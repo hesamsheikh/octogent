@@ -30,11 +30,13 @@
 .terminal-pane--selected .terminal-header {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--accent-primary) 90%, #ffd89d 10%) 0%,
-    color-mix(in srgb, var(--accent-primary) 78%, #d9851c 22%) 100%
+    color-mix(in srgb, var(--accent-primary) 88%, #ffe0a0 12%) 0%,
+    color-mix(in srgb, var(--accent-primary) 72%, #c07010 28%) 100%
   );
-  border-bottom-color: color-mix(in srgb, #121212 35%, transparent);
-  color: #121212;
+  border-bottom-color: color-mix(in srgb, #080808 40%, transparent);
+  /* Subtle top glow on the selected terminal to make it feel "active" */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent);
+  color: #0a0a0a;
 }
 
 .terminal-header[data-connection-state="connected"] {
@@ -290,12 +292,14 @@
 .status-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.1rem 0.35rem;
+  padding: 0.1rem 0.38rem;
   border: 1px solid var(--border-subtle);
   color: #000000;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
+  border-radius: 2px;
 }
 
 .status-badge__compact {
@@ -305,35 +309,45 @@
 .pill.live,
 .status-badge.live {
   background: var(--term-green);
+  border-color: color-mix(in srgb, var(--term-green) 60%, #000);
+  box-shadow: 0 0 6px var(--term-green-glow);
 }
 
 .pill.idle,
 .status-badge.idle {
   background: var(--term-blue);
-  color: #f5fbff;
+  border-color: color-mix(in srgb, var(--term-blue) 80%, #000);
+  color: #dbeeff;
 }
 
 .pill.processing,
 .status-badge.processing {
   background: var(--term-green);
-  color: #031700;
+  border-color: color-mix(in srgb, var(--term-green) 60%, #000);
+  box-shadow: 0 0 8px var(--term-green-glow);
+  color: #021200;
 }
 
 .pill.queued,
 .status-badge.queued {
   background: var(--term-warning);
+  border-color: color-mix(in srgb, var(--term-warning) 60%, #000);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--term-warning) 25%, transparent);
 }
 
 .pill.blocked,
 .status-badge.blocked {
   background: var(--term-red);
-  color: #fff3f3;
+  border-color: color-mix(in srgb, var(--term-red) 60%, #000);
+  box-shadow: 0 0 8px var(--term-red-glow);
+  color: #fff0f0;
 }
 
 .pill.warning,
 .status-badge.warning {
   background: var(--term-warning);
-  color: #1a1000;
+  border-color: color-mix(in srgb, var(--term-warning) 60%, #000);
+  color: #140900;
 }
 
 @media (max-width: 700px) {
