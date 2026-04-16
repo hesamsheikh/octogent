@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join, resolve } from "node:path";
 
+import { logError, logInfo, logWarn } from "./logging";
 import {
   ensureOctogentGitignoreEntry,
   ensureProjectScaffold,
@@ -100,13 +101,13 @@ const initProject = (name?: string) => {
   const projectPath = process.cwd();
   const { created, projectConfig, projectStateDir } = initializeProject(projectPath, name);
 
-  console.log(
+  logInfo(
     `${created ? "Initialized" : "Updated"} Octogent project "${projectConfig.displayName}" at ${projectPath}`,
   );
-  console.log("  .octogent/ directory ready (project metadata, tentacles, worktrees)");
-  console.log(`  Global state: ${projectStateDir}`);
-  console.log("  .gitignore updated");
-  console.log("\nRun `octogent` to start the dashboard.");
+  logInfo("  .octogent/ directory ready (project metadata, tentacles, worktrees)");
+  logInfo(`  Global state: ${projectStateDir}`);
+  logInfo("  .gitignore updated");
+  logInfo("\nRun `octogent` to start the dashboard.");
 };
 
 const canListenOnPort = (port: number): Promise<boolean> =>
@@ -169,7 +170,7 @@ const resolveRuntimeApiBase = () => {
 };
 
 const apiError = () => {
-  console.error(
+  logError(
     `Error: Could not reach API at ${resolveRuntimeApiBase()}. Start Octogent in this project first.`,
   );
   process.exit(1);
@@ -204,15 +205,15 @@ const startServer = async () => {
   if (startupPrerequisiteLines.length > 0) {
     for (const line of startupPrerequisiteLines) {
       if (startupPrerequisiteReport.errors.length > 0) {
-        console.error(line);
+        logError(line);
       } else {
-        console.warn(line);
+        logWarn(line);
       }
     }
     if (startupPrerequisiteReport.errors.length > 0) {
       process.exit(1);
     }
-    console.warn("");
+    logWarn("");
   }
 
   const workspaceCwd = process.cwd();
@@ -256,20 +257,20 @@ const startServer = async () => {
     maybeOpenBrowser(apiBaseUrl);
   }
 
-  console.log();
-  console.log("  Octogent is running");
-  console.log(`  Project: ${workspaceCwd}`);
-  console.log(`  Name:    ${projectDisplayName}`);
-  console.log(`  API:     ${apiBaseUrl}`);
+  logInfo();
+  logInfo("  Octogent is running");
+  logInfo(`  Project: ${workspaceCwd}`);
+  logInfo(`  Name:    ${projectDisplayName}`);
+  logInfo(`  API:     ${apiBaseUrl}`);
   if (hasWebDist) {
-    console.log(`  UI:      ${apiBaseUrl}`);
+    logInfo(`  UI:      ${apiBaseUrl}`);
   } else {
-    console.log("  UI:      bundled web assets are missing from this install");
+    logInfo("  UI:      bundled web assets are missing from this install");
   }
   if (!isInitialized) {
-    console.log("  Setup:   workspace is not initialized yet; use the in-app setup flow");
+    logInfo("  Setup:   workspace is not initialized yet; use the in-app setup flow");
   }
-  console.log();
+  logInfo();
 };
 
 const COLORS = [
@@ -327,14 +328,14 @@ const parseJsonFlag = (flag: string): Record<string, string> | undefined => {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      console.error(`Error: ${flag} must be a JSON object.`);
+      logError(`Error: ${flag} must be a JSON object.`);
       process.exit(1);
     }
 
     const entries = Object.entries(parsed).filter(([, value]) => typeof value === "string");
     return Object.fromEntries(entries);
   } catch {
-    console.error(`Error: ${flag} must be valid JSON.`);
+    logError(`Error: ${flag} must be valid JSON.`);
     process.exit(1);
   }
 };
@@ -342,7 +343,7 @@ const parseJsonFlag = (flag: string): Record<string, string> | undefined => {
 const tentacleCreate = async () => {
   const name = args[2];
   if (!name || name.startsWith("-")) {
-    console.error("Error: tentacle name is required.");
+    logError("Error: tentacle name is required.");
     process.exit(1);
   }
 
@@ -358,10 +359,10 @@ const tentacleCreate = async () => {
     });
     const data = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      console.error(`Error: ${data.error ?? "Failed"}`);
+      logError(`Error: ${data.error ?? "Failed"}`);
       process.exit(1);
     }
-    console.log(`Created tentacle "${data.tentacleId}"`);
+    logInfo(`Created tentacle "${data.tentacleId}"`);
   } catch {
     apiError();
   }
@@ -373,19 +374,19 @@ const tentacleList = async () => {
   try {
     const response = await fetch(`${apiBase}/api/deck/tentacles`);
     if (!response.ok) {
-      console.error("Error: failed to fetch tentacles.");
+      logError("Error: failed to fetch tentacles.");
       process.exit(1);
     }
 
     const tentacles = (await response.json()) as Array<Record<string, unknown>>;
     if (tentacles.length === 0) {
-      console.log("No tentacles found.");
+      logInfo("No tentacles found.");
       return;
     }
 
     for (const tentacle of tentacles) {
       const description = tentacle.description ? ` — ${tentacle.description}` : "";
-      console.log(`  ${tentacle.tentacleId}${description}`);
+      logInfo(`  ${tentacle.tentacleId}${description}`);
     }
   } catch {
     apiError();
@@ -427,10 +428,10 @@ const terminalCreate = async () => {
     });
     const data = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      console.error(`Error: ${data.error ?? "Failed"}`);
+      logError(`Error: ${data.error ?? "Failed"}`);
       process.exit(1);
     }
-    console.log(`Created terminal "${data.terminalId}"`);
+    logInfo(`Created terminal "${data.terminalId}"`);
   } catch {
     apiError();
   }
@@ -439,7 +440,7 @@ const terminalCreate = async () => {
 const channelSend = async () => {
   const terminalId = args[2];
   if (!terminalId || terminalId.startsWith("-")) {
-    console.error("Error: target terminalId is required.");
+    logError("Error: target terminalId is required.");
     process.exit(1);
   }
 
@@ -462,7 +463,7 @@ const channelSend = async () => {
           .trim();
 
   if (!message) {
-    console.error("Error: message content is required.");
+    logError("Error: message content is required.");
     process.exit(1);
   }
 
@@ -478,10 +479,10 @@ const channelSend = async () => {
     );
     const data = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      console.error(`Error: ${data.error ?? "Failed"}`);
+      logError(`Error: ${data.error ?? "Failed"}`);
       process.exit(1);
     }
-    console.log(`Message sent (${data.messageId}) to ${terminalId}`);
+    logInfo(`Message sent (${data.messageId}) to ${terminalId}`);
   } catch {
     apiError();
   }
@@ -490,7 +491,7 @@ const channelSend = async () => {
 const channelList = async () => {
   const terminalId = args[2];
   if (!terminalId || terminalId.startsWith("-")) {
-    console.error("Error: terminalId is required.");
+    logError("Error: terminalId is required.");
     process.exit(1);
   }
 
@@ -501,19 +502,19 @@ const channelList = async () => {
     );
     const data = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      console.error(`Error: ${data.error ?? "Failed"}`);
+      logError(`Error: ${data.error ?? "Failed"}`);
       process.exit(1);
     }
 
     const messages = (data.messages ?? []) as Array<Record<string, unknown>>;
     if (messages.length === 0) {
-      console.log(`No messages for ${terminalId}.`);
+      logInfo(`No messages for ${terminalId}.`);
       return;
     }
 
     for (const message of messages) {
       const status = message.delivered ? "delivered" : "pending";
-      console.log(
+      logInfo(
         `  [${message.messageId}] from=${message.fromTerminalId || "(unknown)"} status=${status}: ${message.content}`,
       );
     }
@@ -534,14 +535,14 @@ const main = async () => {
   if (command === "projects" || command === "project") {
     const projects = loadProjectsRegistry().projects;
     if (projects.length === 0) {
-      console.log(
+      logInfo(
         "No projects registered yet. Run `octogent` or `octogent init` in a project directory.",
       );
       return;
     }
 
     for (const project of projects) {
-      console.log(`  ${project.name}  ${project.id}  ${project.path}`);
+      logInfo(`  ${project.name}  ${project.id}  ${project.path}`);
     }
     return;
   }
@@ -570,7 +571,7 @@ const main = async () => {
     }
   }
 
-  console.log(`Usage:
+  logInfo(`Usage:
   octogent                             Start the dashboard in the current project
   octogent init [project-name]         Initialize the current directory explicitly
   octogent projects                    List registered projects
