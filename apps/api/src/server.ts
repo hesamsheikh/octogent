@@ -13,9 +13,9 @@ const parsePort = (value: string | undefined, fallback: number) => {
   return parsed;
 };
 
-const host = process.env.HOST ?? "127.0.0.1";
-const port = parsePort(process.env.OCTOGENT_API_PORT ?? process.env.PORT, 8787);
 const allowRemoteAccess = process.env.OCTOGENT_ALLOW_REMOTE_ACCESS === "1";
+const host = process.env.HOST ?? (allowRemoteAccess ? "0.0.0.0" : "127.0.0.1");
+const port = parsePort(process.env.OCTOGENT_API_PORT ?? process.env.PORT, 8787);
 const workspaceCwd = process.env.OCTOGENT_WORKSPACE_CWD ?? process.cwd();
 const projectStateDir = process.env.OCTOGENT_PROJECT_STATE_DIR;
 const promptsDir = process.env.OCTOGENT_PROMPTS_DIR;
