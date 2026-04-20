@@ -436,6 +436,38 @@ const terminalCreate = async () => {
   }
 };
 
+const terminalDelete = async () => {
+  const terminalId = args[2];
+  if (!terminalId || terminalId.startsWith("-")) {
+    console.error("Error: terminal ID is required.");
+    console.error("Usage: octogent terminal delete <terminal-id>");
+    process.exit(1);
+  }
+
+  const apiBase = resolveRuntimeApiBase();
+  try {
+    const response = await fetch(`${apiBase}/api/terminals/${encodeURIComponent(terminalId)}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.error(`Error: Terminal "${terminalId}" not found.`);
+      } else if (response.status === 409) {
+        const data = (await response.json()) as Record<string, unknown>;
+        console.error(`Error: ${data.error ?? "Failed to delete terminal."}`);
+      } else {
+        console.error(`Error: Failed to delete terminal (status ${response.status}).`);
+      }
+      process.exit(1);
+    }
+
+    console.log(`Deleted terminal "${terminalId}"`);
+  } catch {
+    apiError();
+  }
+};
+
 const channelSend = async () => {
   const terminalId = args[2];
   if (!terminalId || terminalId.startsWith("-")) {
@@ -559,6 +591,9 @@ const main = async () => {
     if (args[1] === "create") {
       return terminalCreate();
     }
+    if (args[1] === "delete" || args[1] === "stop" || args[1] === "kill") {
+      return terminalDelete();
+    }
   }
 
   if (command === "channel") {
@@ -587,6 +622,7 @@ const main = async () => {
     --parent-terminal-id               Parent terminal ID for child terminals
     --prompt-template                  Prompt template name
     --prompt-variables                 JSON object of prompt template variables
+  octogent terminal delete <id>        Delete a terminal (aliases: stop, kill)
   octogent channel send <id> <msg>     Send a channel message
   octogent channel list <id>           List channel messages`);
   process.exit(1);
