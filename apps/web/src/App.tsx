@@ -27,6 +27,7 @@ import type { TerminalView } from "./app/types";
 import { clampSidebarWidth } from "./app/uiStateNormalizers";
 import { ActiveAgentsSidebar } from "./components/ActiveAgentsSidebar";
 import { ConsolePrimaryNav } from "./components/ConsolePrimaryNav";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PrimaryViewRouter } from "./components/PrimaryViewRouter";
 import { RuntimeStatusStrip } from "./components/RuntimeStatusStrip";
 import { SidebarActionPanel } from "./components/SidebarActionPanel";
@@ -462,6 +463,7 @@ export const App = () => {
               />
             )}
 
+          <ErrorBoundary label="PrimaryView">
           <PrimaryViewRouter
             activePrimaryNav={activePrimaryNav}
             deckPrimaryViewProps={{
@@ -641,6 +643,7 @@ export const App = () => {
             promptsEnabled={isUiStateHydrated && activePrimaryNav === 7}
             onPromptsSidebarContent={setPromptsSidebarContent}
           />
+          </ErrorBoundary>
         </div>
       </section>
 

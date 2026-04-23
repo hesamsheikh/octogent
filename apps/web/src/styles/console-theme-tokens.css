@@ -1,25 +1,94 @@
 :root {
-  --bg-canvas: #050607;
-  --bg-surface-1: #0b0d10;
-  --bg-surface-2: #12151b;
-  --border-subtle: #2b2f36;
-  --text-primary: #e6e8ec;
-  --text-secondary: #a9b0ba;
-  --accent-primary: #d6a21a;
-  --term-red: #8c0b12;
-  --term-green: #25d366;
-  --term-blue: #0d2a57;
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg-canvas: #03050a;
+  --bg-surface-1: #080c12;
+  --bg-surface-2: #0e1520;
+  --bg-surface-3: #141d2b;
+
+  /* ── Borders ──────────────────────────────────────────────────────────── */
+  --border-subtle: #1e2736;
+  --border-medium: #273040;
+  --border-strong: #344055;
+
+  /* ── Text ─────────────────────────────────────────────────────────────── */
+  --text-primary: #e8ecf2;
+  --text-secondary: #8a95a5;
+  --text-muted: #4f5a6a;
+
+  /* ── Accent — refined amber ───────────────────────────────────────────── */
+  --accent-primary: #e8a820;
+  --accent-glow: color-mix(in srgb, #e8a820 28%, transparent);
+  --accent-glow-strong: color-mix(in srgb, #e8a820 48%, transparent);
+
+  /* ── Status colors ────────────────────────────────────────────────────── */
+  --term-red: #c0162a;
+  --term-red-glow: color-mix(in srgb, #c0162a 30%, transparent);
+  --term-green: #20c05a;
+  --term-green-glow: color-mix(in srgb, #20c05a 28%, transparent);
+  --term-blue: #1a4a8a;
   --term-warning: #ffb020;
-  --terminal-bg: #101722;
-  --terminal-header-bg-top: #254570;
-  --terminal-header-bg-bottom: #1e385a;
-  --terminal-header-text: #e6e8ec;
-  --control-border-strong: #2b2f36;
-  --control-bg-strong: #0b0d10;
+
+  /* ── Terminal panel ───────────────────────────────────────────────────── */
+  --terminal-bg: #0b1118;
+  --terminal-header-bg-top: #1a3260;
+  --terminal-header-bg-bottom: #142852;
+  --terminal-header-text: #cdd5e0;
+
+  /* ── Controls ─────────────────────────────────────────────────────────── */
+  --control-border-strong: #1e2736;
+  --control-bg-strong: #080c12;
+
+  /* ── Sidebar — subtle blue-tinted darks ───────────────────────────────── */
+  --sidebar-canvas: color-mix(in srgb, var(--bg-surface-1) 82%, #0a1020 18%);
+  --sidebar-panel: color-mix(in srgb, var(--bg-surface-1) 76%, #0c1528 24%);
+  --sidebar-card: color-mix(in srgb, var(--bg-surface-1) 80%, #0d1726 20%);
+  --sidebar-header: color-mix(in srgb, var(--bg-surface-2) 70%, #121e32 30%);
+  --sidebar-row: color-mix(in srgb, var(--bg-surface-1) 86%, #0e1a28 14%);
+  --sidebar-row-hover: color-mix(in srgb, var(--sidebar-row) 74%, #1a2d44 26%);
+  --sidebar-row-active: color-mix(in srgb, var(--sidebar-row) 60%, #1e3450 40%);
+  --sidebar-border: color-mix(in srgb, var(--border-subtle) 70%, #1e2d40 30%);
+  --sidebar-border-strong: color-mix(in srgb, var(--border-subtle) 46%, #283c55 54%);
+  --sidebar-text-muted: color-mix(in srgb, var(--text-secondary) 82%, #8aa0bc 18%);
+
+  /* ── Scrollbars ───────────────────────────────────────────────────────── */
+  --scrollbar-size: 6px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: color-mix(in srgb, var(--border-strong) 60%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent-primary) 40%, var(--border-strong) 60%);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent-primary) 65%, var(--border-strong) 35%);
+  --terminal-scrollbar-track: transparent;
+  --terminal-scrollbar-thumb: color-mix(in srgb, var(--accent-primary) 25%, var(--terminal-bg) 75%);
+  --terminal-scrollbar-thumb-hover: color-mix(in srgb, var(--accent-primary) 40%, var(--terminal-bg) 60%);
+  --terminal-scrollbar-thumb-active: color-mix(in srgb, var(--accent-primary) 55%, var(--terminal-bg) 45%);
+
   --ui-base-font-size: 17px;
 }
 
 body {
-  background: radial-gradient(circle at top right, #11161e 0%, var(--bg-canvas) 54%);
+  /* Multi-layer gradient: deep blue-black canvas with subtle top-right warm glow */
+  background:
+    radial-gradient(ellipse 60% 50% at 100% 0%, #0e1a2a 0%, transparent 70%),
+    radial-gradient(ellipse 40% 30% at 0% 100%, #0a0f18 0%, transparent 60%),
+    linear-gradient(160deg, #050b14 0%, var(--bg-canvas) 50%);
+  color: var(--text-primary);
+}
+
+/* ── Global transition polish ─────────────────────────────────────────────── */
+
+button,
+[role="button"] {
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease, opacity 120ms ease;
+}
+
+/* ── Focus ring ───────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 1.5px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* ── Selection ────────────────────────────────────────────────────────────── */
+::selection {
+  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
   color: var(--text-primary);
 }

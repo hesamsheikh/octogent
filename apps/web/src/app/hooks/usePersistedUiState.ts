@@ -419,6 +419,29 @@ export const usePersistedUiState = ({
     setCanvasOpenTentacleIds((current) => retainActiveTerminalIds(current, activeTentacleIds));
   }, [columns]);
 
+  // Flush pending UI state synchronously on tab close so the debounce window
+  // cannot cause state loss when the user navigates away mid-debounce.
+  const pendingUiStateRef = useRef<FrontendUiStateSnapshot | null>(null);
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const pending = pendingUiStateRef.current;
+      if (!pending) {
+        return;
+      }
+      // sendBeacon survives the page unload and does not block the browser.
+      const body = JSON.stringify(pending);
+      const url = buildUiStateUrl();
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isUiStateHydrated) {
       return;
@@ -445,8 +468,11 @@ export const usePersistedUiState = ({
     });
 
     if (areUiStateSnapshotsEqual(lastPersistedUiStateRef.current, payload)) {
+      pendingUiStateRef.current = null;
       return;
     }
+
+    pendingUiStateRef.current = payload;
 
     const timerId = window.setTimeout(() => {
       void fetch(buildUiStateUrl(), {
@@ -462,6 +488,7 @@ export const usePersistedUiState = ({
             throw new Error(`Unexpected status ${response.status}`);
           }
           lastPersistedUiStateRef.current = payload;
+          pendingUiStateRef.current = null;
         })
         .catch((error: unknown) => {
           console.warn("[ui-state] Failed to persist UI state:", error);
