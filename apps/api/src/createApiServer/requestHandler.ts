@@ -8,7 +8,7 @@ import type { ClaudeUsageSnapshot } from "../claudeUsage";
 import type { CodeIntelStore } from "../codeIntelStore";
 import type { CodexUsageSnapshot } from "../codexUsage";
 import type { GitHubRepoSummarySnapshot } from "../githubRepoSummary";
-import { logVerbose } from "../logging";
+import { logError, logVerbose } from "../logging";
 import type { MonitorService } from "../monitor";
 import { handleCodeIntelEventsRoute } from "./codeIntelRoutes";
 import {
@@ -187,7 +187,7 @@ const serveStaticFile = async (
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
     if (code !== "ENOENT") {
-      console.error(
+      logError(
         `[API] Static file error: ${filePath}`,
         error instanceof Error ? error.message : error,
       );
@@ -303,7 +303,7 @@ export const createApiRequestHandler = ({
       writeJson(response, 404, { error: "Not found" }, corsOrigin);
       logRequest(request.method ?? "?", requestUrl.pathname, statusCode, startTime);
     } catch (error) {
-      console.error(
+      logError(
         `[API] Unhandled error: ${request.method ?? "?"} ${request.url ?? "/"}`,
         error instanceof Error ? (error.stack ?? error.message) : error,
       );

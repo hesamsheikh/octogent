@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { logWarn } from "../logging";
 import { TERMINAL_REGISTRY_VERSION } from "./constants";
 
 import { toErrorMessage } from "./systemClients";
@@ -404,7 +405,7 @@ export const createTerminalRegistryPersistence = (registryPath: string) => {
           await writeSerializedRegistry(registryPath, serialized);
           lastPersistedSerialized = serialized;
         } catch (error) {
-          console.warn("[terminal-registry] Failed to persist registry:", error);
+          logWarn("[terminal-registry] Failed to persist registry:", error);
         }
       }
     })().finally(() => {

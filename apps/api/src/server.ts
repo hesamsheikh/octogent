@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createApiServer } from "./createApiServer";
+import { logError, logInfo, logWarn } from "./logging";
 
 const parsePort = (value: string | undefined, fallback: number) => {
   if (!value) {
@@ -27,20 +28,20 @@ const validateStartupEnv = () => {
   if (rawPort !== undefined) {
     const parsed = Number.parseInt(rawPort, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
-      console.error(`Invalid port "${rawPort}": must be an integer between 1 and 65535.`);
+      logError(`Invalid port "${rawPort}": must be an integer between 1 and 65535.`);
       process.exit(1);
     }
   }
 
   if (process.env.OCTOGENT_WORKSPACE_CWD && !existsSync(process.env.OCTOGENT_WORKSPACE_CWD)) {
-    console.error(
+    logError(
       `OCTOGENT_WORKSPACE_CWD directory does not exist: ${process.env.OCTOGENT_WORKSPACE_CWD}`,
     );
     process.exit(1);
   }
 
   if (process.env.OCTOGENT_WEB_DIST_DIR && !existsSync(process.env.OCTOGENT_WEB_DIST_DIR)) {
-    console.warn(
+    logWarn(
       `OCTOGENT_WEB_DIST_DIR directory does not exist: ${process.env.OCTOGENT_WEB_DIST_DIR} — web UI will be unavailable.`,
     );
   }
@@ -72,9 +73,9 @@ process.on("SIGTERM", () => {
 apiServer
   .start(port, host)
   .then(({ port: activePort }) => {
-    console.log(`Octogent API listening on http://${host}:${activePort}`);
+    logInfo(`Octogent API listening on http://${host}:${activePort}`);
   })
   .catch((error: unknown) => {
-    console.error(error);
+    logError(error);
     process.exit(1);
   });

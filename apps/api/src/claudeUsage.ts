@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ClaudeUsageSnapshot, asNumber, asRecord, asString } from "@octogent/core";
-import { logVerbose } from "./logging";
+import { logVerbose, logWarn } from "./logging";
 import { toResetIso } from "./usageUtils";
 
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
@@ -459,7 +459,7 @@ const persistOkSnapshot = async (
     await mkdir(dirname(snapshotPath), { recursive: true });
     await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
   } catch (error) {
-    console.warn(
+    logWarn(
       `[claude-usage] unable to persist snapshot: ${error instanceof Error ? error.message : String(error)}`,
     );
   }

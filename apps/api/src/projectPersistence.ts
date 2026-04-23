@@ -8,6 +8,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { logInfo } from "./logging";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -372,6 +373,6 @@ export const migrateStateToGlobal = (workspaceCwd: string, projectStateDir: stri
   }
 
   if (migrated > 0) {
-    console.log(`  Migrated state to ${projectStateDir}`);
+    logInfo(`  Migrated state to ${projectStateDir}`);
   }
 };
