@@ -1,5 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
+import { apiClient } from "../runtime/apiClient";
+import { buildTerminalsUrl } from "../runtime/runtimeEndpoints";
 import { usePromptLibrary } from "../app/hooks/usePromptLibrary";
 import { SidebarPromptsList } from "./SidebarPromptsList";
 import { Terminal } from "./Terminal";
@@ -83,17 +85,14 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
   const handleNewPrompt = useCallback(async () => {
     setIsCreatingTerminal(true);
     try {
-      const res = await fetch("/api/terminals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await apiClient.post<{ terminalId?: string; tentacleId?: string }>(
+        buildTerminalsUrl(),
+        {
           workspaceMode: "shared",
           agentProvider: "claude-code",
           promptTemplate: "meta-prompt-generator",
-        }),
-      });
-      if (!res.ok) throw new Error("Failed to create terminal");
-      const data = (await res.json()) as { terminalId?: string; tentacleId?: string };
+        },
+      );
       const agentId = (data.terminalId ?? data.tentacleId) as string;
       setNewPromptMode({ terminalId: agentId });
       setShowTerminal(true);

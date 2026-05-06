@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import { buildUiStateUrl } from "../../runtime/runtimeEndpoints";
 import type { PrimaryNavIndex } from "../constants";
 import { MIN_SIDEBAR_WIDTH, PRIMARY_NAV_ITEMS, UI_STATE_SAVE_DEBOUNCE_MS } from "../constants";
@@ -235,26 +236,8 @@ export const usePersistedUiState = ({
 
   const readUiState = useCallback(async (signal?: AbortSignal) => {
     try {
-      const requestOptions: {
-        method: "GET";
-        headers: { Accept: string };
-        signal?: AbortSignal;
-      } = {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      };
-      if (signal) {
-        requestOptions.signal = signal;
-      }
-
-      const response = await fetch(buildUiStateUrl(), requestOptions);
-      if (!response.ok) {
-        return null;
-      }
-
-      return normalizeFrontendUiStateSnapshot(await response.json());
+      const raw = await apiClient.get<unknown>(buildUiStateUrl(), signal ? { signal } : undefined);
+      return normalizeFrontendUiStateSnapshot(raw);
     } catch {
       return null;
     }
@@ -449,18 +432,9 @@ export const usePersistedUiState = ({
     }
 
     const timerId = window.setTimeout(() => {
-      void fetch(buildUiStateUrl(), {
-        method: "PATCH",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`Unexpected status ${response.status}`);
-          }
+      void apiClient
+        .patch(buildUiStateUrl(), payload)
+        .then(() => {
           lastPersistedUiStateRef.current = payload;
         })
         .catch((error: unknown) => {

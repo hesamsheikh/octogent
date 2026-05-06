@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import { buildPromptItemUrl, buildPromptsUrl } from "../../runtime/runtimeEndpoints";
 import type { PromptDetail, PromptLibraryEntry } from "../types";
 
@@ -43,9 +44,7 @@ export const usePromptLibrary = ({
     setIsLoadingPrompts(true);
     setErrorMessage(null);
     try {
-      const res = await fetch(buildPromptsUrl());
-      if (!res.ok) throw new Error("Failed to load prompts");
-      const data = (await res.json()) as { prompts: PromptLibraryEntry[] };
+      const data = await apiClient.get<{ prompts: PromptLibraryEntry[] }>(buildPromptsUrl());
       setPrompts(data.prompts);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to load prompts");
@@ -62,11 +61,10 @@ export const usePromptLibrary = ({
 
     const requestId = ++detailRequestRef.current;
 
-    fetch(buildPromptItemUrl(name))
-      .then(async (res) => {
+    apiClient
+      .get<PromptDetail>(buildPromptItemUrl(name))
+      .then((data) => {
         if (requestId !== detailRequestRef.current) return;
-        if (!res.ok) throw new Error("Prompt not found");
-        const data = (await res.json()) as PromptDetail;
         setSelectedPromptDetail(data);
       })
       .catch((err) => {
@@ -85,15 +83,7 @@ export const usePromptLibrary = ({
     async (name: string, content: string): Promise<boolean> => {
       setErrorMessage(null);
       try {
-        const res = await fetch(buildPromptsUrl(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, content }),
-        });
-        if (!res.ok) {
-          const data = (await res.json()) as { error?: string };
-          throw new Error(data.error ?? "Failed to save prompt");
-        }
+        await apiClient.post(buildPromptsUrl(), { name, content });
         await refreshPrompts();
         return true;
       } catch (err) {
@@ -108,8 +98,7 @@ export const usePromptLibrary = ({
     async (name: string): Promise<boolean> => {
       setErrorMessage(null);
       try {
-        const res = await fetch(buildPromptItemUrl(name), { method: "DELETE" });
-        if (!res.ok) throw new Error("Failed to delete prompt");
+        await apiClient.delete(buildPromptItemUrl(name));
         if (selectedPromptName === name) {
           setSelectedPromptName(null);
           setSelectedPromptDetail(null);
@@ -140,13 +129,9 @@ export const usePromptLibrary = ({
     if (!selectedPromptName) return false;
     setErrorMessage(null);
     try {
-      const res = await fetch(buildPromptItemUrl(selectedPromptName), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: editDraft }),
+      const data = await apiClient.put<PromptDetail>(buildPromptItemUrl(selectedPromptName), {
+        content: editDraft,
       });
-      if (!res.ok) throw new Error("Failed to update prompt");
-      const data = (await res.json()) as PromptDetail;
       setSelectedPromptDetail(data);
       setIsEditing(false);
       setEditDraft("");

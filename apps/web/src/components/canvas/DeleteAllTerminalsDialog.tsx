@@ -2,6 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 
 import type { GraphNode } from "../../app/canvas/types";
 import type { TerminalView } from "../../app/types";
+import { apiClient } from "../../runtime/apiClient";
+import {
+  buildConversationSessionUrl,
+  buildTerminalUrl,
+} from "../../runtime/runtimeEndpoints";
 import { ActionButton } from "../ui/ActionButton";
 
 type DeleteAllTerminalsDialogProps = {
@@ -9,19 +14,6 @@ type DeleteAllTerminalsDialogProps = {
   nodes: GraphNode[];
   onCancel: () => void;
   onDeleted: (result: { hadFailures: boolean }) => void;
-};
-
-const readDeleteFailureMessage = async (response: Response, fallback: string) => {
-  try {
-    const payload = (await response.json()) as { error?: unknown };
-    if (typeof payload.error === "string" && payload.error.trim().length > 0) {
-      return payload.error;
-    }
-  } catch {
-    // Ignore malformed error payloads and fall back to the status line.
-  }
-
-  return fallback;
 };
 
 export const DeleteAllTerminalsDialog = ({
@@ -59,18 +51,7 @@ export const DeleteAllTerminalsDialog = ({
 
     for (const terminal of activeTargets) {
       try {
-        const response = await fetch(`/api/terminals/${encodeURIComponent(terminal.terminalId)}`, {
-          method: "DELETE",
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) {
-          failures.push(
-            `${terminal.tentacleName || terminal.label || terminal.terminalId}: ${await readDeleteFailureMessage(
-              response,
-              `Delete failed (${response.status})`,
-            )}`,
-          );
-        }
+        await apiClient.delete(buildTerminalUrl(terminal.terminalId));
       } catch (error) {
         failures.push(
           `${terminal.tentacleName || terminal.label || terminal.terminalId}: ${
@@ -84,18 +65,7 @@ export const DeleteAllTerminalsDialog = ({
 
     for (const sessionId of inactiveSessionIds) {
       try {
-        const response = await fetch(`/api/conversations/${encodeURIComponent(sessionId)}`, {
-          method: "DELETE",
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) {
-          failures.push(
-            `Conversation ${sessionId}: ${await readDeleteFailureMessage(
-              response,
-              `Delete failed (${response.status})`,
-            )}`,
-          );
-        }
+        await apiClient.delete(buildConversationSessionUrl(sessionId));
       } catch (error) {
         failures.push(
           `Conversation ${sessionId}: ${error instanceof Error ? error.message : "Delete failed."}`,

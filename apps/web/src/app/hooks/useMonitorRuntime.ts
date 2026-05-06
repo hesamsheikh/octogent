@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import {
   buildMonitorConfigUrl,
   buildMonitorFeedUrl,
@@ -67,18 +68,8 @@ export const useMonitorRuntime = ({
       return;
     }
 
-    const response = await fetch(buildMonitorConfigUrl(), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Unable to read monitor config (${response.status})`);
-    }
-
-    const parsed = normalizeMonitorConfigSnapshot(await response.json());
+    const raw = await apiClient.get<unknown>(buildMonitorConfigUrl());
+    const parsed = normalizeMonitorConfigSnapshot(raw);
     if (!parsed) {
       throw new Error("Monitor config payload is invalid.");
     }
@@ -100,20 +91,11 @@ export const useMonitorRuntime = ({
       setIsRefreshingMonitorFeed(true);
 
       try {
-        const url = manual ? buildMonitorRefreshUrl() : buildMonitorFeedUrl();
-        const method = manual ? "POST" : "GET";
-        const response = await fetch(url, {
-          method,
-          headers: {
-            Accept: "application/json",
-          },
-        });
+        const raw = manual
+          ? await apiClient.post<unknown>(buildMonitorRefreshUrl())
+          : await apiClient.get<unknown>(buildMonitorFeedUrl());
 
-        if (!response.ok) {
-          throw new Error(`Unable to read monitor feed (${response.status})`);
-        }
-
-        const parsed = normalizeMonitorFeedSnapshot(await response.json());
+        const parsed = normalizeMonitorFeedSnapshot(raw);
         if (!parsed) {
           throw new Error("Monitor feed payload is invalid.");
         }
@@ -138,21 +120,8 @@ export const useMonitorRuntime = ({
 
       setIsSavingMonitorConfig(true);
       try {
-        const response = await fetch(buildMonitorConfigUrl(), {
-          method: "PATCH",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(patch),
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => ({}))) as { error?: string };
-          throw new Error(payload.error ?? `Unable to save monitor config (${response.status})`);
-        }
-
-        const parsed = normalizeMonitorConfigSnapshot(await response.json());
+        const raw = await apiClient.patch<unknown>(buildMonitorConfigUrl(), patch);
+        const parsed = normalizeMonitorConfigSnapshot(raw);
         if (!parsed) {
           throw new Error("Monitor config response is invalid.");
         }

@@ -3,6 +3,12 @@ import { useCallback } from "react";
 
 import type { PrimaryNavIndex } from "../constants";
 import type { TerminalAgentProvider, TerminalView, TerminalWorkspaceMode } from "../types";
+import { apiClient } from "../../runtime/apiClient";
+import {
+  buildDeckSwarmUrl,
+  buildDeckTentaclesUrl,
+  buildTerminalsUrl,
+} from "../../runtime/runtimeEndpoints";
 import { OCTOBOSS_ID } from "./useCanvasGraphData";
 
 export const useCanvasActions = ({
@@ -25,18 +31,15 @@ export const useCanvasActions = ({
   ) => void;
 }) => {
   const onLaunchWorkspaceSetupPlanner = useCallback(async () => {
-    const response = await fetch("/api/terminals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const snapshot = await apiClient
+      .post<{ terminalId?: string }>(buildTerminalsUrl(), {
         name: "tentacle-planner",
         workspaceMode: "shared",
         agentProvider: "claude-code",
         promptTemplate: "tentacle-planner",
-      }),
-    });
-    if (!response.ok) return undefined;
-    const snapshot = (await response.json()) as { terminalId?: string };
+      })
+      .catch(() => undefined);
+    if (!snapshot) return undefined;
     await refreshColumns();
     return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
   }, [refreshColumns]);
@@ -57,43 +60,31 @@ export const useCanvasActions = ({
   );
 
   const onCreateTentacle = useCallback(async () => {
-    const response = await fetch("/api/deck/tentacles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "", description: "" }),
-    });
-    if (!response.ok) return;
+    await apiClient
+      .post(buildDeckTentaclesUrl(), { name: "", description: "" })
+      .catch(() => undefined);
     await refreshColumns();
   }, [refreshColumns]);
 
   const onSpawnSwarm = useCallback(
     async (tentacleId: string, workspaceMode: TerminalWorkspaceMode) => {
-      const response = await fetch(
-        `/api/deck/tentacles/${encodeURIComponent(tentacleId)}/swarm`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspaceMode }),
-        },
-      );
-      if (!response.ok) return;
+      await apiClient
+        .post(buildDeckSwarmUrl(tentacleId), { workspaceMode })
+        .catch(() => undefined);
     },
     [],
   );
 
   const onOctobossAction = useCallback(
     async (action: string) => {
-      const response = await fetch("/api/terminals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const snapshot = await apiClient
+        .post<{ terminalId?: string }>(buildTerminalsUrl(), {
           workspaceMode: "shared",
           tentacleId: OCTOBOSS_ID,
           promptTemplate: action,
-        }),
-      });
-      if (!response.ok) return undefined;
-      const snapshot = (await response.json()) as { terminalId?: string };
+        })
+        .catch(() => undefined);
+      if (!snapshot) return undefined;
       await refreshColumns();
       return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
     },
@@ -102,18 +93,15 @@ export const useCanvasActions = ({
 
   const onTentacleAction = useCallback(
     async (tentacleId: string, action: string) => {
-      const response = await fetch("/api/terminals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const snapshot = await apiClient
+        .post<{ terminalId?: string }>(buildTerminalsUrl(), {
           workspaceMode: "shared",
           tentacleId,
           promptTemplate: action,
           promptVariables: { tentacleId },
-        }),
-      });
-      if (!response.ok) return undefined;
-      const snapshot = (await response.json()) as { terminalId?: string };
+        })
+        .catch(() => undefined);
+      if (!snapshot) return undefined;
       await refreshColumns();
       return typeof snapshot.terminalId === "string" ? snapshot.terminalId : undefined;
     },

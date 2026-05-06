@@ -1,6 +1,7 @@
 import type { WorkspaceSetupSnapshot, WorkspaceSetupStepId } from "@octogent/core";
 import { useCallback, useEffect, useState } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import { buildWorkspaceSetupStepUrl, buildWorkspaceSetupUrl } from "../../runtime/runtimeEndpoints";
 
 type UseWorkspaceSetupResult = {
@@ -11,15 +12,6 @@ type UseWorkspaceSetupResult = {
   runWorkspaceSetupStep: (stepId: WorkspaceSetupStepId) => Promise<WorkspaceSetupSnapshot | null>;
 };
 
-const readErrorMessage = async (response: Response, fallback: string) => {
-  try {
-    const payload = (await response.json()) as { error?: unknown };
-    return typeof payload.error === "string" ? payload.error : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
 export const useWorkspaceSetup = (): UseWorkspaceSetupResult => {
   const [workspaceSetup, setWorkspaceSetup] = useState<WorkspaceSetupSnapshot | null>(null);
   const [isWorkspaceSetupLoading, setIsWorkspaceSetupLoading] = useState(true);
@@ -28,13 +20,7 @@ export const useWorkspaceSetup = (): UseWorkspaceSetupResult => {
   const refreshWorkspaceSetup = useCallback(async () => {
     try {
       setWorkspaceSetupError(null);
-      const response = await fetch(buildWorkspaceSetupUrl(), {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Unable to load workspace setup."));
-      }
-      const payload = (await response.json()) as WorkspaceSetupSnapshot;
+      const payload = await apiClient.get<WorkspaceSetupSnapshot>(buildWorkspaceSetupUrl());
       setWorkspaceSetup(payload);
       return payload;
     } catch (error) {
@@ -49,14 +35,9 @@ export const useWorkspaceSetup = (): UseWorkspaceSetupResult => {
   const runWorkspaceSetupStep = useCallback(async (stepId: WorkspaceSetupStepId) => {
     try {
       setWorkspaceSetupError(null);
-      const response = await fetch(buildWorkspaceSetupStepUrl(stepId), {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, `Unable to run ${stepId}.`));
-      }
-      const payload = (await response.json()) as WorkspaceSetupSnapshot;
+      const payload = await apiClient.post<WorkspaceSetupSnapshot>(
+        buildWorkspaceSetupStepUrl(stepId),
+      );
       setWorkspaceSetup(payload);
       return payload;
     } catch (error) {

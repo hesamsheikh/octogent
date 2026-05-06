@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import {
   buildTentacleGitCommitUrl,
   buildTentacleGitPullRequestMergeUrl,
@@ -39,19 +40,6 @@ type UseTentacleGitLifecycleResult = {
   pushTentacleBranch: () => Promise<void>;
   syncTentacleBranch: () => Promise<void>;
   mergeTentaclePullRequest: () => Promise<void>;
-};
-
-const parseGitError = async (response: Response, fallback: string) => {
-  try {
-    const payload = (await response.json()) as { error?: unknown };
-    if (typeof payload.error === "string" && payload.error.trim().length > 0) {
-      return payload.error.trim();
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
 };
 
 const parseTentacleGitStatus = (payload: unknown): TentacleGitStatusSnapshot | null => {
@@ -168,21 +156,8 @@ export const useTentacleGitLifecycle = ({
     }));
 
     try {
-      const response = await fetch(buildTentacleGitStatusUrl(tentacleId), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-      if (!response.ok) {
-        const errorMessage = await parseGitError(
-          response,
-          `Unable to fetch git status (${response.status}).`,
-        );
-        throw new Error(errorMessage);
-      }
-
-      const payload = parseTentacleGitStatus(await response.json());
+      const raw = await apiClient.get<unknown>(buildTentacleGitStatusUrl(tentacleId));
+      const payload = parseTentacleGitStatus(raw);
       if (!payload) {
         throw new Error("Unable to parse git status response.");
       }
@@ -207,21 +182,8 @@ export const useTentacleGitLifecycle = ({
     }));
 
     try {
-      const response = await fetch(buildTentacleGitPullRequestUrl(tentacleId), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-      if (!response.ok) {
-        const errorMessage = await parseGitError(
-          response,
-          `Unable to fetch pull request status (${response.status}).`,
-        );
-        throw new Error(errorMessage);
-      }
-
-      const payload = parseTentaclePullRequest(await response.json());
+      const raw = await apiClient.get<unknown>(buildTentacleGitPullRequestUrl(tentacleId));
+      const payload = parseTentaclePullRequest(raw);
       if (!payload) {
         throw new Error("Unable to parse pull request response.");
       }
@@ -345,7 +307,7 @@ export const useTentacleGitLifecycle = ({
   const runGitMutation = useCallback(
     async (
       action: "commit" | "push" | "sync",
-      request: { body?: string; headers?: Record<string, string> } = {},
+      body?: unknown,
     ): Promise<TentacleGitStatusSnapshot | null> => {
       if (!openGitTentacleId) {
         return null;
@@ -361,24 +323,8 @@ export const useTentacleGitLifecycle = ({
       setIsGitDialogMutating(true);
       setGitDialogError(null);
       try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            ...request.headers,
-          },
-          body: request.body ?? null,
-        });
-
-        if (!response.ok) {
-          const errorMessage = await parseGitError(
-            response,
-            `Unable to ${action} (${response.status}).`,
-          );
-          throw new Error(errorMessage);
-        }
-
-        const payload = parseTentacleGitStatus(await response.json());
+        const raw = await apiClient.post<unknown>(endpoint, body);
+        const payload = parseTentacleGitStatus(raw);
         if (!payload) {
           throw new Error("Unable to parse git lifecycle response.");
         }
@@ -400,51 +346,32 @@ export const useTentacleGitLifecycle = ({
     [openGitTentacleId],
   );
 
-  const runPullRequestMutation = useCallback(
-    async (request: { body?: string; headers?: Record<string, string> } = {}) => {
-      if (!openGitTentacleId) {
-        return;
+  const runPullRequestMutation = useCallback(async () => {
+    if (!openGitTentacleId) {
+      return;
+    }
+
+    const endpoint = buildTentacleGitPullRequestMergeUrl(openGitTentacleId);
+
+    setIsGitDialogMutating(true);
+    setGitDialogError(null);
+    try {
+      const raw = await apiClient.post<unknown>(endpoint);
+      const payload = parseTentaclePullRequest(raw);
+      if (!payload) {
+        throw new Error("Unable to parse pull request response.");
       }
 
-      const endpoint = buildTentacleGitPullRequestMergeUrl(openGitTentacleId);
-
-      setIsGitDialogMutating(true);
-      setGitDialogError(null);
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            ...request.headers,
-          },
-          body: request.body ?? null,
-        });
-
-        if (!response.ok) {
-          const errorMessage = await parseGitError(
-            response,
-            `Unable to merge pull request (${response.status}).`,
-          );
-          throw new Error(errorMessage);
-        }
-
-        const payload = parseTentaclePullRequest(await response.json());
-        if (!payload) {
-          throw new Error("Unable to parse pull request response.");
-        }
-
-        setPullRequestByTentacleId((current) => ({
-          ...current,
-          [openGitTentacleId]: payload,
-        }));
-      } catch (error) {
-        setGitDialogError(error instanceof Error ? error.message : "Unable to merge pull request.");
-      } finally {
-        setIsGitDialogMutating(false);
-      }
-    },
-    [openGitTentacleId],
-  );
+      setPullRequestByTentacleId((current) => ({
+        ...current,
+        [openGitTentacleId]: payload,
+      }));
+    } catch (error) {
+      setGitDialogError(error instanceof Error ? error.message : "Unable to merge pull request.");
+    } finally {
+      setIsGitDialogMutating(false);
+    }
+  }, [openGitTentacleId]);
 
   const commitTentacleChanges = useCallback(async () => {
     const message = gitCommitMessageDraft.trim();
@@ -453,12 +380,7 @@ export const useTentacleGitLifecycle = ({
       return;
     }
 
-    const committed = await runGitMutation("commit", {
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ message }),
-    });
+    const committed = await runGitMutation("commit", { message });
     if (committed) {
       setGitCommitMessageDraft("");
     }
@@ -471,12 +393,7 @@ export const useTentacleGitLifecycle = ({
       return;
     }
 
-    const committed = await runGitMutation("commit", {
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ message }),
-    });
+    const committed = await runGitMutation("commit", { message });
     if (!committed) {
       return;
     }

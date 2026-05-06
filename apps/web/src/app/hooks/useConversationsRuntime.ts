@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { apiClient } from "../../runtime/apiClient";
 import {
   buildConversationExportUrl,
   buildConversationSearchUrl,
@@ -84,18 +85,7 @@ export const useConversationsRuntime = ({
 
     setIsLoadingSessions(true);
     try {
-      const response = await fetch(buildConversationsUrl(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Unable to read conversations (${response.status})`);
-      }
-
-      const payload = (await response.json()) as unknown;
+      const payload = await apiClient.get<unknown>(buildConversationsUrl());
       const normalized = Array.isArray(payload)
         ? payload
             .map((entry) => normalizeConversationSessionSummary(entry))
@@ -124,14 +114,7 @@ export const useConversationsRuntime = ({
 
     setIsClearing(true);
     try {
-      const response = await fetch(buildConversationsUrl(), {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Unable to clear conversations (${response.status})`);
-      }
-
+      await apiClient.delete(buildConversationsUrl());
       setSessions([]);
       setSelectedSessionId(null);
       setSelectedSession(null);
@@ -150,14 +133,7 @@ export const useConversationsRuntime = ({
       }
 
       try {
-        const response = await fetch(buildConversationSessionUrl(sessionId), {
-          method: "DELETE",
-        });
-
-        if (!response.ok) {
-          throw new Error(`Unable to delete conversation (${response.status})`);
-        }
-
+        await apiClient.delete(buildConversationSessionUrl(sessionId));
         setSessions((current) => {
           const remaining = current.filter((s) => s.sessionId !== sessionId);
           if (selectedSessionId === sessionId) {
@@ -197,19 +173,8 @@ export const useConversationsRuntime = ({
 
       setIsExporting(true);
       try {
-        const response = await fetch(buildConversationExportUrl(sessionId, format), {
-          method: "GET",
-          headers: {
-            Accept: format === "json" ? "application/json" : "text/markdown",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Unable to export conversation (${response.status})`);
-        }
-
         if (format === "json") {
-          const payload = (await response.json()) as unknown;
+          const payload = await apiClient.get<unknown>(buildConversationExportUrl(sessionId, format));
           const normalized = normalizeConversationSessionDetail(payload);
           const json = `${JSON.stringify(normalized ?? payload, null, 2)}\n`;
           return {
@@ -219,7 +184,7 @@ export const useConversationsRuntime = ({
           };
         }
 
-        const markdown = await response.text();
+        const markdown = await apiClient.getText(buildConversationExportUrl(sessionId, format));
         return {
           filename: buildExportFilename(sessionId, "md"),
           contentType: "text/markdown",
@@ -252,16 +217,9 @@ export const useConversationsRuntime = ({
 
       setIsSearching(true);
       try {
-        const response = await fetch(buildConversationSearchUrl(trimmed), {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Search failed (${response.status})`);
-        }
-
-        const payload = (await response.json()) as { hits?: unknown[] };
+        const payload = await apiClient.get<{ hits?: unknown[] }>(
+          buildConversationSearchUrl(trimmed),
+        );
         const hits = Array.isArray(payload.hits) ? (payload.hits as ConversationSearchHit[]) : [];
         setSearchHits(hits);
         setHighlightedTurnId(null);
@@ -317,18 +275,8 @@ export const useConversationsRuntime = ({
 
     const loadSelectedSession = async () => {
       try {
-        const response = await fetch(buildConversationSessionUrl(selectedSessionId), {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Unable to read conversation (${response.status})`);
-        }
-
-        const payload = normalizeConversationSessionDetail(await response.json());
+        const raw = await apiClient.get<unknown>(buildConversationSessionUrl(selectedSessionId));
+        const payload = normalizeConversationSessionDetail(raw);
         if (!payload) {
           throw new Error("Conversation response is invalid.");
         }

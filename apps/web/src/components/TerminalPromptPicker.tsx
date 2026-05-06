@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PromptDetail, PromptLibraryEntry } from "../app/types";
+import { apiClient } from "../runtime/apiClient";
 import { buildPromptItemUrl, buildPromptsUrl } from "../runtime/runtimeEndpoints";
 
 type TerminalPromptPickerProps = {
@@ -36,10 +37,9 @@ export const TerminalPromptPicker = ({
     if (!isOpen) return;
 
     setIsLoading(true);
-    fetch(buildPromptsUrl())
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as { prompts: PromptLibraryEntry[] };
+    apiClient
+      .get<{ prompts: PromptLibraryEntry[] }>(buildPromptsUrl())
+      .then((data) => {
         setPrompts(data.prompts);
       })
       .catch(() => {
@@ -73,9 +73,7 @@ export const TerminalPromptPicker = ({
   const handleSelectPrompt = useCallback(
     async (name: string) => {
       try {
-        const res = await fetch(buildPromptItemUrl(name));
-        if (!res.ok) return;
-        const data = (await res.json()) as PromptDetail;
+        const data = await apiClient.get<PromptDetail>(buildPromptItemUrl(name));
         onSelectPrompt(data.content);
         onClose();
       } catch {

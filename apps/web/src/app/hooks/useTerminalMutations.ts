@@ -2,6 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { TerminalAgentProvider, TerminalView, TerminalWorkspaceMode } from "../types";
+import { apiClient } from "../../runtime/apiClient";
+import { buildTerminalUrl, buildTerminalsUrl } from "../../runtime/runtimeEndpoints";
 
 export type PendingDeleteTerminal = {
   terminalId: string;
@@ -89,20 +91,7 @@ export const useTerminalMutations = ({
 
       try {
         setLoadError(null);
-        const encodedTerminalId = encodeURIComponent(terminalId);
-        const response = await fetch(`/api/terminals/${encodedTerminalId}`, {
-          method: "PATCH",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ name: trimmedName }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Unable to rename terminal (${response.status})`);
-        }
-
+        await apiClient.patch(buildTerminalUrl(terminalId), { name: trimmedName });
         const nextColumns = await readColumns();
         setColumns(nextColumns);
         setEditingTerminalId(null);
@@ -122,27 +111,15 @@ export const useTerminalMutations = ({
       try {
         setIsCreatingTerminal(true);
         setLoadError(null);
-        const response = await fetch("/api/terminals", {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            workspaceMode,
-            agentProvider: agentProvider ?? "claude-code",
-            ...(tentacleId ? { tentacleId } : {}),
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Unable to create terminal (${response.status})`);
-        }
-
-        const createdSnapshot = (await response.json()) as {
+        const createdSnapshot = await apiClient.post<{
           terminalId?: unknown;
           tentacleName?: unknown;
-        };
+        }>(buildTerminalsUrl(), {
+          workspaceMode,
+          agentProvider: agentProvider ?? "claude-code",
+          ...(tentacleId ? { tentacleId } : {}),
+        });
+
         const nextColumns = await readColumns();
         setColumns(nextColumns);
 
@@ -200,17 +177,7 @@ export const useTerminalMutations = ({
     try {
       setLoadError(null);
       setIsDeletingTerminalId(terminalId);
-      const encodedTerminalId = encodeURIComponent(terminalId);
-      const response = await fetch(`/api/terminals/${encodedTerminalId}`, {
-        method: "DELETE",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Unable to delete terminal (${response.status})`);
-      }
+      await apiClient.delete(buildTerminalUrl(terminalId));
 
       if (editingTerminalId === terminalId) {
         setEditingTerminalId(null);
