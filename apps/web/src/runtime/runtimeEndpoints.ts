@@ -393,6 +393,18 @@ export const buildPromptItemUrl = (name: string, runtimeBaseUrl = readRuntimeBas
   return buildAbsoluteUrl(runtimeBaseUrl, path);
 };
 
+export const buildTerminalUrl = (terminalId: string, runtimeBaseUrl = readRuntimeBaseUrl()) => {
+  const path = `/api/terminals/${encodeURIComponent(terminalId)}`;
+  if (!runtimeBaseUrl) return path;
+  return buildAbsoluteUrl(runtimeBaseUrl, path);
+};
+
+export const buildDeckSwarmUrl = (tentacleId: string, runtimeBaseUrl = readRuntimeBaseUrl()) => {
+  const path = `/api/deck/tentacles/${encodeURIComponent(tentacleId)}/swarm`;
+  if (!runtimeBaseUrl) return path;
+  return buildAbsoluteUrl(runtimeBaseUrl, path);
+};
+
 export const buildTerminalSocketUrl = (
   tentacleId: string,
   runtimeBaseUrl = readRuntimeBaseUrl(),

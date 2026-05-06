@@ -4,6 +4,7 @@ import { type Ref, useCallback, useMemo, useState } from "react";
 import type { DeckTentacleSummary, TentacleWorkspaceMode } from "@octogent/core";
 import type { GraphNode } from "../../app/canvas/types";
 import type { ConversationSessionSummary } from "../../app/types";
+import { apiClient } from "../../runtime/apiClient";
 import {
   buildDeckTodoAddUrl,
   buildDeckTodoDeleteUrl,
@@ -132,17 +133,10 @@ export const CanvasTentaclePanel = ({
 
   const handleTodoToggle = useCallback(
     async (itemIndex: number, done: boolean) => {
-      try {
-        const response = await fetch(buildDeckTodoToggleUrl(node.tentacleId), {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemIndex, done }),
-        });
-        if (!response.ok) return;
-        await refreshTentacleData();
-      } catch {
-        // silent
-      }
+      await apiClient
+        .patchEmpty(buildDeckTodoToggleUrl(node.tentacleId), { itemIndex, done })
+        .then(() => refreshTentacleData())
+        .catch(() => {});
     },
     [node.tentacleId, refreshTentacleData],
   );
@@ -150,18 +144,13 @@ export const CanvasTentaclePanel = ({
   const handleTodoEdit = useCallback(
     async (itemIndex: number, text: string) => {
       if (text.trim().length === 0) return;
-      try {
-        const response = await fetch(buildDeckTodoEditUrl(node.tentacleId), {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemIndex, text: text.trim() }),
-        });
-        if (!response.ok) return;
-        setEditingIndex(null);
-        await refreshTentacleData();
-      } catch {
-        // silent
-      }
+      await apiClient
+        .patchEmpty(buildDeckTodoEditUrl(node.tentacleId), { itemIndex, text: text.trim() })
+        .then(() => {
+          setEditingIndex(null);
+          return refreshTentacleData();
+        })
+        .catch(() => {});
     },
     [node.tentacleId, refreshTentacleData],
   );
@@ -169,50 +158,33 @@ export const CanvasTentaclePanel = ({
   const handleTodoAdd = useCallback(
     async (text: string) => {
       if (text.trim().length === 0) return;
-      try {
-        const response = await fetch(buildDeckTodoAddUrl(node.tentacleId), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: text.trim() }),
-        });
-        if (!response.ok) return;
-        setAddingTodo(false);
-        setAddText("");
-        await refreshTentacleData();
-      } catch {
-        // silent
-      }
+      await apiClient
+        .postEmpty(buildDeckTodoAddUrl(node.tentacleId), { text: text.trim() })
+        .then(() => {
+          setAddingTodo(false);
+          setAddText("");
+          return refreshTentacleData();
+        })
+        .catch(() => {});
     },
     [node.tentacleId, refreshTentacleData],
   );
 
   const handleTodoDelete = useCallback(
     async (itemIndex: number) => {
-      try {
-        const response = await fetch(buildDeckTodoDeleteUrl(node.tentacleId), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemIndex }),
-        });
-        if (!response.ok) return;
-        await refreshTentacleData();
-      } catch {
-        // silent
-      }
+      await apiClient
+        .postEmpty(buildDeckTodoDeleteUrl(node.tentacleId), { itemIndex })
+        .then(() => refreshTentacleData())
+        .catch(() => {});
     },
     [node.tentacleId, refreshTentacleData],
   );
 
   const handleTodoSolve = useCallback(
     async (itemIndex: number) => {
+      setSolvingTodoIndex(itemIndex);
       try {
-        setSolvingTodoIndex(itemIndex);
-        const response = await fetch(buildDeckTodoSolveUrl(node.tentacleId), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemIndex }),
-        });
-        if (!response.ok) return;
+        await apiClient.postEmpty(buildDeckTodoSolveUrl(node.tentacleId), { itemIndex });
         onSolveTodoItem?.(node.tentacleId, itemIndex);
       } catch {
         // silent

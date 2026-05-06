@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DeckTentacleSummary } from "@octogent/core";
+import { apiClient } from "../../runtime/apiClient";
 import { buildConversationsUrl, buildDeckTentaclesUrl } from "../../runtime/runtimeEndpoints";
 import type { GraphEdge, GraphNode } from "../canvas/types";
 import { normalizeConversationSessionSummary } from "../conversationNormalizers";
@@ -162,12 +163,7 @@ export const useCanvasGraphData = ({
 
   const fetchDeckTentacles = useCallback(async () => {
     try {
-      const response = await fetch(buildDeckTentaclesUrl(), {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as unknown;
+      const payload = await apiClient.get<unknown>(buildDeckTentaclesUrl());
       if (!Array.isArray(payload)) return;
       const items = payload
         .map((entry) => normalizeDeckTentacleSummary(entry))
@@ -180,12 +176,7 @@ export const useCanvasGraphData = ({
 
   const fetchInactiveSessions = useCallback(async () => {
     try {
-      const response = await fetch(buildConversationsUrl(), {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as unknown;
+      const payload = await apiClient.get<unknown>(buildConversationsUrl());
       const normalized = Array.isArray(payload)
         ? payload
             .map((entry) => normalizeConversationSessionSummary(entry))
