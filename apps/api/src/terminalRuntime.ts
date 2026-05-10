@@ -120,6 +120,8 @@ export const createTerminalRuntime = ({
     switch (lifecycleState) {
       case "stale":
         return "stale";
+      case "stalled":
+        return "stalled";
       case "exited":
         return "exited";
       case "stopped":
@@ -232,6 +234,25 @@ export const createTerminalRuntime = ({
     agentRuntimeState: string,
     toolName?: string,
   ) => {
+    // Reliability: stamp lastActiveAt on every state change so the stall
+    // detector below can spot agents whose claude is hung at a dialog
+    // (process alive, but no transcript activity).
+    const terminal = terminals.get(terminalId);
+    if (terminal) {
+      terminal.lastActiveAt = new Date().toISOString();
+      // Auto-recover from a previously-stalled state if the agent
+      // resumes — flip lifecycleState back to running.
+      if (terminal.lifecycleState === "stalled") {
+        terminal.lifecycleState = "running";
+        terminal.lifecycleReason = undefined;
+        terminal.lifecycleUpdatedAt = terminal.lastActiveAt;
+        broadcastTerminalEvent({
+          type: "terminal-lifecycle-changed",
+          terminalId,
+          lifecycleState: "running",
+        });
+      }
+    }
     broadcastTerminalEvent({
       type: "terminal-state-changed",
       terminalId,
@@ -239,6 +260,50 @@ export const createTerminalRuntime = ({
       ...(toolName ? { toolName } : {}),
     });
   };
+
+  // Reliability fix #2: stall detector. A terminal whose underlying
+  // claude process is hung at an interactive dialog (auth, trust prompt,
+  // etc.) shows lifecycleState=running with no transcript activity for
+  // many minutes. Without this, operators only notice via "still no
+  // commits at 10 min" which wastes time + tokens.
+  //
+  // Threshold is intentionally tight (default 2 min) — a real working
+  // agent emits state_change events on every claude turn (typically
+  // every 5-30s). Two minutes of silence is a reliable signal.
+  const TERMINAL_STALL_THRESHOLD_MS = Number.parseInt(
+    process.env.OCTOGENT_TERMINAL_STALL_MS ?? "120000",
+    10,
+  );
+  const detectStalledTerminals = () => {
+    const now = Date.now();
+    for (const terminal of terminals.values()) {
+      if (terminal.lifecycleState !== "running") continue;
+      const startedAt = terminal.startedAt ? new Date(terminal.startedAt).getTime() : 0;
+      const lastActiveAt = terminal.lastActiveAt ? new Date(terminal.lastActiveAt).getTime() : 0;
+      const lastActivity = Math.max(startedAt, lastActiveAt);
+      if (lastActivity === 0) continue;
+      if (now - lastActivity < TERMINAL_STALL_THRESHOLD_MS) continue;
+
+      // Mark stalled. Don't kill the PTY — operator decides whether to
+      // restart, kill, or send input. This is just a visibility signal.
+      terminal.lifecycleState = "stalled";
+      terminal.lifecycleReason = `no transcript activity for ${Math.round(
+        (now - lastActivity) / 1000,
+      )}s`;
+      terminal.lifecycleUpdatedAt = new Date(now).toISOString();
+      broadcastTerminalEvent({
+        type: "terminal-lifecycle-changed",
+        terminalId: terminal.terminalId,
+        lifecycleState: "stalled",
+        lifecycleReason: terminal.lifecycleReason,
+      });
+    }
+  };
+  const stallDetectorInterval = setInterval(detectStalledTerminals, 30_000);
+  // Don't keep the event loop alive if everything else is idle.
+  if (typeof stallDetectorInterval.unref === "function") {
+    stallDetectorInterval.unref();
+  }
 
   const sessionRuntime = createSessionRuntime({
     websocketServer,
@@ -791,6 +856,7 @@ export const createTerminalRuntime = ({
     },
 
     async close() {
+      clearInterval(stallDetectorInterval);
       sessionRuntime.close();
       await registryPersistence.close();
       for (const client of terminalEventClients) {

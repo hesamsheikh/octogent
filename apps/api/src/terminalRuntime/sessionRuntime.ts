@@ -357,7 +357,7 @@ export const createSessionRuntime = ({
 
     if (options.killPty) {
       try {
-        session.pty.kill(options.killSignal);
+        session.pty?.kill(options.killSignal);
       } catch {
         // Ignore teardown errors; session will still be discarded.
       }
@@ -376,6 +376,23 @@ export const createSessionRuntime = ({
     if (sessions.get(sessionId) === session) {
       sessions.delete(sessionId);
     }
+
+    // Reliability fix: drop the heavy references that hold the IPty's
+    // master FD alive. The disposables above remove our listeners, but
+    // the IPty object itself is held by `session.pty` (and indirectly
+    // by the data/exit closure scopes that captured `session`). Null
+    // them out explicitly so the next GC pass can release the FD —
+    // otherwise PTY allocations accumulate until `kern.tty.ptmx_max`
+    // is exhausted (default 511 on macOS, ~10-20 min of usage).
+    //
+    // This runs on a `setImmediate` boundary so any in-flight node-pty
+    // callbacks (the exit handler especially) finish first.
+    setImmediate(() => {
+      session.pty = null;
+      session.scrollbackChunks = [];
+      session.scrollbackBytes = 0;
+      session.transcriptLog = undefined;
+    });
   };
 
   const closeSession = (sessionId: string): boolean => {
@@ -477,7 +494,7 @@ export const createSessionRuntime = ({
     const bootstrapCommand =
       TERMINAL_BOOTSTRAP_COMMANDS[provider] ?? TERMINAL_BOOTSTRAP_COMMANDS[DEFAULT_AGENT_PROVIDER];
     appendDebugLog(session, `bootstrap session=${sessionId} command=${bootstrapCommand}`);
-    session.pty.write(`${bootstrapCommand}\r`);
+    session.pty?.write(`${bootstrapCommand}\r`);
 
     // Schedule initial prompt injection after Claude Code has had time to boot.
     if (session.initialPrompt && !session.isInitialPromptSent) {
@@ -491,13 +508,13 @@ export const createSessionRuntime = ({
           session.isInitialPromptSent = true;
           appendDebugLog(session, `initial-prompt session=${sessionId}`);
           const prompt = session.initialPrompt ?? "";
-          session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
+          session.pty?.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
           schedulePromptTimer(
             session,
             sessionId,
             () => {
               appendDebugLog(session, `initial-prompt-submit session=${sessionId}`);
-              session.pty.write("\r");
+              session.pty?.write("\r");
             },
             INITIAL_PROMPT_SUBMIT_DELAY_MS,
           );
@@ -517,7 +534,7 @@ export const createSessionRuntime = ({
           session.isInitialInputDraftSent = true;
           appendDebugLog(session, `initial-input-draft session=${sessionId}`);
           const draft = session.initialInputDraft ?? "";
-          session.pty.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
+          session.pty?.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
         },
         INITIAL_PROMPT_DELAY_MS,
       );
@@ -602,7 +619,9 @@ export const createSessionRuntime = ({
       emitStateIfChanged(session, sessionId, session.stateTracker.poll(Date.now()));
     }, 300);
 
-    const dataDisposable = session.pty.onData((chunk) => {
+    // session.pty is guaranteed non-null here (just assigned ~80 lines up).
+    // The non-null assertion documents intent for the type checker.
+    const dataDisposable = session.pty!.onData((chunk) => {
       if (session.isClosed) {
         return;
       }
@@ -617,7 +636,7 @@ export const createSessionRuntime = ({
       emitStateIfChanged(session, sessionId, nextState);
     });
 
-    const exitDisposable = session.pty.onExit(({ exitCode, signal }) => {
+    const exitDisposable = session.pty!.onExit(({ exitCode, signal }) => {
       if (session.isClosed) {
         return;
       }
@@ -711,7 +730,7 @@ export const createSessionRuntime = ({
               session,
               `ws-input session=${sessionId} data=${JSON.stringify(payload.data)}`,
             );
-            session.pty.write(payload.data);
+            session.pty?.write(payload.data);
             if (/[\r\n]/.test(payload.data)) {
               emitStateIfChanged(
                 session,
@@ -735,10 +754,10 @@ export const createSessionRuntime = ({
 
             session.cols = nextCols;
             session.rows = nextRows;
-            session.pty.resize(nextCols, nextRows);
+            session.pty?.resize(nextCols, nextRows);
           }
         } catch {
-          session.pty.write(text);
+          session.pty?.write(text);
         }
       });
 
@@ -824,7 +843,7 @@ export const createSessionRuntime = ({
       return false;
     }
 
-    session.pty.write(data);
+    session.pty?.write(data);
     if (/[\r\n]/.test(data)) {
       emitStateIfChanged(session, terminalId, session.stateTracker.observeSubmit(Date.now()));
     }
@@ -845,7 +864,7 @@ export const createSessionRuntime = ({
 
     session.cols = nextCols;
     session.rows = nextRows;
-    session.pty.resize(nextCols, nextRows);
+    session.pty?.resize(nextCols, nextRows);
     return true;
   };
 

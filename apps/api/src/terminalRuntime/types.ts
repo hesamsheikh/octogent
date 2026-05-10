@@ -56,7 +56,12 @@ export type Disposable = {
 export type TerminalSession = {
   terminalId: string;
   tentacleId: string;
-  pty: IPty;
+  // Reliability fix: set to null after teardown so the only remaining
+  // reference to the IPty drops and GC can release the underlying master
+  // FD. Without this, accumulated PTY allocations exhaust
+  // `kern.tty.ptmx_max` (default 511 on macOS) within ~10-20 minutes
+  // of normal usage. Reads must guard with `if (!session.isClosed)` first.
+  pty: IPty | null;
   ptyDisposables?: Disposable[];
   clients: Set<WebSocket>;
   directListeners: Set<DirectSessionListener>;
