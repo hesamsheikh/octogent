@@ -15,7 +15,7 @@
   "scripts": {
     "start": "pnpm dev",
     "dev": "node scripts/dev.mjs",
-    "build": "pnpm --filter @octogent/web build && pnpm --filter @octogent/web exec vite build --config vite.api.bundle.config.mts && node scripts/build-package.mjs",
+    "build": "node scripts/build.mjs",
     "smoke:public-install": "node scripts/smoke-public-install.mjs",
     "test": "pnpm -r test",
     "lint": "biome check .",
