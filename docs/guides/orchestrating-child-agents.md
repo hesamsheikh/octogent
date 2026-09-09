@@ -2,6 +2,8 @@
 
 Octogent uses child terminals to split work into parallel streams.
 
+If you are the one dispatching work from a shell — a person or an AI coordinator that is not itself an Octogent terminal — start with [the coordinator's routine](getting-work-done.md#the-coordinators-routine-dispatch--wait--read--follow-up--review--finish): dispatch, `terminal wait`, `terminal result`, follow up over the channel, review, finish. This page covers the parent/child mechanics underneath.
+
 ## How spawning works
 
 A child agent is a normal terminal record with `parentTerminalId` set. The relationship is stored in the terminal registry and shown in the UI; the child still has its own terminal ID, lifecycle state, transcript, workspace mode, and optional worktree.

@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
 import type { TentacleGitStatusSnapshot, TentaclePullRequestSnapshot } from "../app/types";
 import { ActionButton } from "./ui/ActionButton";
 
@@ -23,8 +24,6 @@ type TentacleGitActionsDialogProps = {
   onCleanupWorktree: () => void;
 };
 
-const renderDirtyState = (isDirty: boolean) => (isDirty ? "Dirty" : "Clean");
-
 export const TentacleGitActionsDialog = ({
   tentacleId,
   tentacleName,
@@ -43,6 +42,7 @@ export const TentacleGitActionsDialog = ({
   onMergePullRequest,
   onCleanupWorktree,
 }: TentacleGitActionsDialogProps) => {
+  const t = useT();
   const [isCommitMenuOpen, setIsCommitMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -52,25 +52,21 @@ export const TentacleGitActionsDialog = ({
   }, [isLoading, isMutating]);
 
   const globalDisabledReason = isLoading
-    ? "Git lifecycle snapshot is loading."
+    ? t("web.git.loading")
     : isMutating
-      ? "Another git action is currently running."
+      ? t("web.git.actionRunning")
       : null;
 
   const commitDisabledReason =
     globalDisabledReason ??
-    (gitCommitMessage.trim().length === 0 ? "Commit blocked: enter a commit message." : null);
+    (gitCommitMessage.trim().length === 0 ? t("web.git.commitBlocked") : null);
   const commitAndPushDisabledReason = commitDisabledReason;
 
   const pushDisabledReason =
-    globalDisabledReason ??
-    ((gitStatus?.aheadCount ?? 0) <= 0
-      ? "Push blocked: no local commits ahead of upstream."
-      : null);
+    globalDisabledReason ?? ((gitStatus?.aheadCount ?? 0) <= 0 ? t("web.git.pushBlocked") : null);
 
   const syncDisabledReason =
-    globalDisabledReason ??
-    (gitStatus?.isDirty ? "Sync blocked: worktree has uncommitted changes." : null);
+    globalDisabledReason ?? (gitStatus?.isDirty ? t("web.git.syncBlocked") : null);
 
   const hasOpenPullRequest = gitPullRequest?.status === "open";
   const canMergePullRequest =
@@ -80,14 +76,14 @@ export const TentacleGitActionsDialog = ({
   const mergePullRequestDisabledReason =
     globalDisabledReason ??
     (!hasOpenPullRequest
-      ? "Merge blocked: no open pull request."
+      ? t("web.git.mergeBlocked")
       : gitPullRequest?.isDraft === true
-        ? "Merge blocked: pull request is still a draft."
+        ? t("web.git.mergeBlockedDraft")
         : gitPullRequest?.mergeable === "CONFLICTING"
-          ? "Merge blocked: pull request has merge conflicts."
+          ? t("web.git.mergeBlockedConflicts")
           : canMergePullRequest
             ? null
-            : "Merge blocked: pull request is not mergeable yet.");
+            : t("web.git.mergeBlockedNotMergeable"));
 
   const cleanupDisabledReason = globalDisabledReason;
 
@@ -111,43 +107,43 @@ export const TentacleGitActionsDialog = ({
       tabIndex={-1}
     >
       <header className="git-actions-header">
-        <h2>Worktree Git Actions</h2>
+        <h2>{t("web.git.title")}</h2>
         <div className="git-actions-header-actions">
-          <span className="pill git-actions-worktree-badge">WORKTREE</span>
+          <span className="pill git-actions-worktree-badge">{t("web.git.worktreeBadge")}</span>
           <ActionButton
-            aria-label="Close sidebar action panel"
+            aria-label={t("web.a11y.closeSidebarActionPanel")}
             className="git-actions-close"
             disabled={isMutating}
             onClick={onClose}
             size="dense"
             variant="accent"
           >
-            Close
+            {t("common.close")}
           </ActionButton>
         </div>
       </header>
       <div className="git-actions-body">
         <p className="git-actions-message">
-          Manage git lifecycle for <strong>{tentacleName}</strong> ({tentacleId}).
+          {t("web.git.manageLifecycle", { name: tentacleName, id: tentacleId })}
         </p>
         {isLoading ? (
-          <p className="git-actions-loading">Loading git status...</p>
+          <p className="git-actions-loading">{t("web.git.loadingStatus")}</p>
         ) : gitStatus ? (
           <dl className="git-actions-status">
             <div>
-              <dt>Branch</dt>
+              <dt>{t("web.git.branch")}</dt>
               <dd>{gitStatus.branchName}</dd>
             </div>
             <div>
-              <dt>Upstream</dt>
-              <dd>{gitStatus.upstreamBranchName ?? "Not set"}</dd>
+              <dt>{t("web.git.upstream")}</dt>
+              <dd>{gitStatus.upstreamBranchName ?? t("web.git.status.notSet")}</dd>
             </div>
             <div>
-              <dt>State</dt>
-              <dd>{renderDirtyState(gitStatus.isDirty)}</dd>
+              <dt>{t("web.git.state")}</dt>
+              <dd>{gitStatus.isDirty ? t("web.git.status.dirty") : t("web.git.status.clean")}</dd>
             </div>
             <div>
-              <dt>Sync</dt>
+              <dt>{t("web.git.sync")}</dt>
               <dd className="git-actions-sync-metric">
                 <span className="git-actions-ahead-count">{gitStatus.aheadCount}</span>
                 <span className="git-actions-metric-separator">/</span>
@@ -155,7 +151,7 @@ export const TentacleGitActionsDialog = ({
               </dd>
             </div>
             <div>
-              <dt>Line diff</dt>
+              <dt>{t("web.git.lineDiff")}</dt>
               <dd className="git-actions-line-diff-metric">
                 <span className="git-actions-insertions-count">+{gitStatus.insertedLineCount}</span>
                 <span className="git-actions-metric-separator">/</span>
@@ -164,12 +160,15 @@ export const TentacleGitActionsDialog = ({
             </div>
           </dl>
         ) : (
-          <p className="git-actions-loading">No git status available.</p>
+          <p className="git-actions-loading">{t("web.git.noStatus")}</p>
         )}
 
-        <section className="git-actions-commit-panel" aria-label="Source control composer">
+        <section
+          className="git-actions-commit-panel"
+          aria-label={t("web.a11y.sourceControlComposer")}
+        >
           <label className="git-actions-commit-label" htmlFor="git-actions-commit-input">
-            Message
+            {t("web.git.section.message")}
           </label>
           <textarea
             aria-label={`Commit message for ${tentacleId}`}
@@ -184,19 +183,19 @@ export const TentacleGitActionsDialog = ({
           />
           <div className="git-actions-commit-controls">
             <ActionButton
-              aria-label="Commit changes"
+              aria-label={t("web.a11y.commitChanges")}
               className="git-actions-commit-main"
               disabled={Boolean(commitDisabledReason)}
               onClick={onCommit}
               size="dense"
               variant="accent"
             >
-              {isMutating ? "Running..." : "Commit"}
+              {isMutating ? t("web.git.running") : t("web.git.commit")}
             </ActionButton>
             <button
               aria-expanded={isCommitMenuOpen}
               aria-haspopup="menu"
-              aria-label="Open commit options"
+              aria-label={t("web.a11y.openCommitOptions")}
               className="git-actions-commit-toggle"
               disabled={Boolean(globalDisabledReason)}
               onClick={() => {
@@ -219,7 +218,7 @@ export const TentacleGitActionsDialog = ({
                 role="menuitem"
                 type="button"
               >
-                Commit
+                {t("web.git.commit")}
               </button>
               <button
                 className="git-actions-commit-menu-item"
@@ -231,7 +230,7 @@ export const TentacleGitActionsDialog = ({
                 role="menuitem"
                 type="button"
               >
-                Commit & Push
+                {t("web.git.commitPush")}
               </button>
               <button
                 className="git-actions-commit-menu-item"
@@ -243,7 +242,7 @@ export const TentacleGitActionsDialog = ({
                 role="menuitem"
                 type="button"
               >
-                Push
+                {t("web.git.push")}
               </button>
               <button
                 className="git-actions-commit-menu-item"
@@ -255,7 +254,7 @@ export const TentacleGitActionsDialog = ({
                 role="menuitem"
                 type="button"
               >
-                Sync with Base
+                {t("web.git.syncBase")}
               </button>
             </div>
           )}
@@ -264,34 +263,32 @@ export const TentacleGitActionsDialog = ({
           {syncDisabledReason ? (
             <p className="git-action-hint">{syncDisabledReason}</p>
           ) : (
-            <p className="git-action-hint">Sync is ready. Use the commit menu to run sync.</p>
+            <p className="git-action-hint">{t("web.git.syncReady")}</p>
           )}
         </section>
 
-        <section className="git-actions-pr-section" aria-label="Pull request workflow">
+        <section className="git-actions-pr-section" aria-label={t("web.a11y.pullRequestWorkflow")}>
           <div className="git-actions-pr-header">
-            <h3>Pull request</h3>
+            <h3>{t("web.git.section.pr")}</h3>
             <p className="git-actions-pr-status">
-              Status: {gitPullRequest?.status ?? "none"}
+              {t("web.git.section.status")} {gitPullRequest?.status ?? "none"}
               {gitPullRequest?.number ? ` · #${gitPullRequest.number}` : ""}
             </p>
           </div>
-          <p className="git-action-hint">
-            Create pull requests directly in GitHub after pushing your branch.
-          </p>
+          <p className="git-action-hint">{t("web.git.prCreateHint")}</p>
           <div className="git-actions-pr-buttons">
             <ActionButton
-              aria-label="Merge pull request"
+              aria-label={t("web.git.mergePr")}
               className="git-actions-merge-pr"
               disabled={Boolean(mergePullRequestDisabledReason)}
               onClick={onMergePullRequest}
               size="dense"
               variant="info"
             >
-              Merge pull request
+              {t("web.git.mergePr")}
             </ActionButton>
             <ActionButton
-              aria-label="Open pull request in GitHub"
+              aria-label={t("web.git.openOnGithub")}
               className="git-actions-open-pr"
               disabled={!gitPullRequest?.url}
               onClick={() => {
@@ -303,34 +300,30 @@ export const TentacleGitActionsDialog = ({
               size="dense"
               variant="accent"
             >
-              Open on GitHub
+              {t("web.git.openOnGithub")}
             </ActionButton>
           </div>
           {mergePullRequestDisabledReason && (
             <p className="git-action-reason">{mergePullRequestDisabledReason}</p>
           )}
-          {!gitPullRequest?.url && (
-            <p className="git-action-hint">No pull request URL detected for this branch yet.</p>
-          )}
+          {!gitPullRequest?.url && <p className="git-action-hint">{t("web.git.noPrUrl")}</p>}
         </section>
 
         <div className="git-action-row git-action-row--cleanup">
           <div className="git-action-content">
-            <p className="git-action-title">Cleanup worktree</p>
-            <p className="git-action-hint">
-              Deletes the worktree directory and branch after confirmation.
-            </p>
+            <p className="git-action-title">{t("web.git.cleanupWorktree")}</p>
+            <p className="git-action-hint">{t("web.git.cleanupDesc")}</p>
             {cleanupDisabledReason && <p className="git-action-reason">{cleanupDisabledReason}</p>}
           </div>
           <ActionButton
-            aria-label="Cleanup worktree"
+            aria-label={t("web.git.cleanupWorktree")}
             className="git-actions-cleanup"
             disabled={Boolean(cleanupDisabledReason)}
             onClick={onCleanupWorktree}
             size="dense"
             variant="danger"
           >
-            Cleanup worktree
+            {t("web.git.cleanupWorktree")}
           </ActionButton>
         </div>
 

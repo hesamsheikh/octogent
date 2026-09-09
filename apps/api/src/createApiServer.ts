@@ -11,10 +11,16 @@ import {
 } from "./claudeUsage";
 import { createCodeIntelStore } from "./codeIntelStore";
 import { readCodexUsageSnapshot as readCodexUsageSnapshotDefault } from "./codexUsage";
+import {
+  assertSecureRemoteBinding,
+  isLoopbackAddress,
+  resolveAccessToken,
+} from "./createApiServer/remoteAuth";
 import { createApiRequestHandler } from "./createApiServer/requestHandler";
 import type { CreateApiServerOptions } from "./createApiServer/types";
 import { createUpgradeHandler } from "./createApiServer/upgradeHandler";
 import { readGithubRepoSummary as readGithubRepoSummaryDefault } from "./githubRepoSummary";
+import { createHealthSnapshotSource } from "./healthSnapshot";
 import { createMonitorService } from "./monitor";
 import { createTerminalRuntime } from "./terminalRuntime";
 
@@ -33,8 +39,9 @@ export const createApiServer = ({
   scanUsageHeatmap,
   monitorService,
   invalidateClaudeUsageCache = invalidateUsageCacheDefault,
-  allowRemoteAccess = false,
+  accessToken: configuredAccessToken = resolveAccessToken(process.env),
 }: CreateApiServerOptions = {}) => {
+  const accessToken = configuredAccessToken?.trim() || null;
   const resolvedWorkspaceCwd = workspaceCwd ?? process.cwd();
   // State lives in ~/.octogent/projects/<name>/ when provided, else falls back to <project>/.octogent/
   const resolvedStateDir = projectStateDir ?? join(resolvedWorkspaceCwd, ".octogent");
@@ -113,6 +120,8 @@ export const createApiServer = ({
     ((scope: "all" | "project") => scanClaudeUsageChart(scope, resolvedWorkspaceCwd));
 
   const codeIntelStore = createCodeIntelStore(resolvedStateDir);
+  const healthSnapshotSource = createHealthSnapshotSource();
+  let remoteBinding = false;
 
   const requestHandler = createApiRequestHandler({
     runtime,
@@ -132,7 +141,9 @@ export const createApiServer = ({
     monitorService: monitorServiceWithDefault,
     invalidateClaudeUsageCache,
     codeIntelStore,
-    allowRemoteAccess,
+    readHealthSnapshot: () => healthSnapshotSource.readHealthSnapshot(runtime.readHealthCounts()),
+    isRemoteBinding: () => remoteBinding,
+    accessToken,
   });
 
   const server = createServer(requestHandler);
@@ -141,7 +152,8 @@ export const createApiServer = ({
     "upgrade",
     createUpgradeHandler({
       runtime,
-      allowRemoteAccess,
+      isRemoteBinding: () => remoteBinding,
+      accessToken,
     }),
   );
 
@@ -149,8 +161,21 @@ export const createApiServer = ({
     server,
     async start(port = 8787, host = "127.0.0.1") {
       await new Promise<void>((resolveStart, rejectStart) => {
-        server.listen(port, host, () => resolveStart());
-        server.once("error", rejectStart);
+        const onError = (error: Error) => rejectStart(error);
+        server.once("error", onError);
+        server.listen(port, host, () => {
+          server.off("error", onError);
+          const address = server.address();
+          const boundAddress = typeof address === "object" && address ? address.address : host;
+          remoteBinding = !isLoopbackAddress(boundAddress);
+
+          try {
+            assertSecureRemoteBinding(boundAddress, accessToken);
+            resolveStart();
+          } catch (error) {
+            server.close(() => rejectStart(error));
+          }
+        });
       });
 
       const address = server.address();
@@ -160,7 +185,11 @@ export const createApiServer = ({
       return { host, port: resolvedPort };
     },
     async stop() {
+      healthSnapshotSource.close();
       await runtime.close();
+      if (!server.listening) {
+        return;
+      }
       await new Promise<void>((resolveStop, rejectStop) => {
         server.close((error) => {
           if (error) {

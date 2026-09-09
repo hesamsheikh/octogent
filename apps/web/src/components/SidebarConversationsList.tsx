@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
+
 import type { ConversationSearchHit, ConversationSessionSummary } from "../app/types";
 
 const getSessionTitle = (session: ConversationSessionSummary): string => {
@@ -46,6 +48,7 @@ export const SidebarConversationsList = ({
   onClearSearch,
   onNavigateToHit,
 }: SidebarConversationsListProps) => {
+  const t = useT();
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -116,10 +119,13 @@ export const SidebarConversationsList = ({
   const isShowingResults = searchQuery.length > 0;
 
   return (
-    <section className="active-agents-section" aria-label="Sidebar section Conversations">
+    <section
+      className="active-agents-section"
+      aria-label={t("web.a11y.sidebarSectionConversations")}
+    >
       <div className="sidebar-conversations-toolbar">
         <button
-          aria-label="Refresh conversations"
+          aria-label={t("web.a11y.refreshConversations")}
           className="sidebar-conversations-icon-btn"
           disabled={isLoadingSessions}
           onClick={onRefresh}
@@ -142,7 +148,7 @@ export const SidebarConversationsList = ({
           </svg>
         </button>
         <button
-          aria-label="Clear all conversations"
+          aria-label={t("web.a11y.clearAllConversations")}
           className="sidebar-conversations-icon-btn sidebar-conversations-icon-btn--danger"
           disabled={sessions.length === 0}
           onClick={onClearAll}
@@ -187,20 +193,20 @@ export const SidebarConversationsList = ({
             ref={inputRef}
             type="text"
             className="sidebar-conversations-search-input"
-            placeholder="Search conversations..."
+            placeholder={t("web.conversations.search")}
             value={inputValue}
             onChange={(e) => {
               setInputValue(e.target.value);
             }}
             onKeyDown={handleKeyDown}
-            aria-label="Search conversations"
+            aria-label={t("web.a11y.searchConversations")}
           />
           {(inputValue.length > 0 || isShowingResults) && (
             <button
               type="button"
               className="sidebar-conversations-search-clear"
               onClick={handleClearSearch}
-              aria-label="Clear search"
+              aria-label={t("web.a11y.clearSearch")}
             >
               <svg
                 aria-hidden="true"
@@ -222,10 +228,12 @@ export const SidebarConversationsList = ({
 
       <div className="active-agents-section-panel">
         {isSearching ? (
-          <p className="active-agents-status">Searching...</p>
+          <p className="active-agents-status">{t("web.conversations.searching")}</p>
         ) : isShowingResults ? (
           searchHits.length === 0 ? (
-            <p className="active-agents-status">No results for "{searchQuery}"</p>
+            <p className="active-agents-status">
+              {t("web.conversations.noResults", { query: searchQuery })}
+            </p>
           ) : (
             <div className="sidebar-search-results">
               <p className="sidebar-search-results-count">
@@ -251,7 +259,7 @@ export const SidebarConversationsList = ({
             </div>
           )
         ) : sessions.length === 0 ? (
-          <p className="active-agents-status">No conversations yet.</p>
+          <p className="active-agents-status">{t("web.conversations.noConversations")}</p>
         ) : (
           <ol className="sidebar-conversations-list">
             {sortedSessions.map((session) => (
@@ -266,8 +274,8 @@ export const SidebarConversationsList = ({
                   type="button"
                 >
                   <strong>{getSessionTitle(session)}</strong>
-                  <span>{`Tentacle ${session.tentacleId ?? "--"}`}</span>
-                  <span>{`${session.turnCount} turns`}</span>
+                  <span>{`${t("web.conversations.tentacleLabel")} ${session.tentacleId ?? "--"}`}</span>
+                  <span>{t("web.conversations.turns", { count: session.turnCount })}</span>
                 </button>
               </li>
             ))}

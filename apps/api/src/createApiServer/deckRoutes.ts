@@ -73,7 +73,7 @@ const buildSingleTodoWorkerPrompt = async ({
 
 export const handleDeckTentaclesRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
-  { workspaceCwd, projectStateDir },
+  { runtime, workspaceCwd, projectStateDir },
 ) => {
   if (requestUrl.pathname !== "/api/deck/tentacles") return false;
 
@@ -117,6 +117,7 @@ export const handleDeckTentaclesRoute: ApiRouteHandler = async (
       return true;
     }
 
+    runtime.broadcastDeckChanged();
     writeJson(response, 201, result.tentacle, corsOrigin);
     return true;
   }
@@ -144,7 +145,7 @@ const DECK_TENTACLE_ITEM_PATTERN = /^\/api\/deck\/tentacles\/([^/]+)$/;
 
 export const handleDeckTentacleItemRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
-  { workspaceCwd, projectStateDir },
+  { runtime, workspaceCwd, projectStateDir },
 ) => {
   const match = requestUrl.pathname.match(DECK_TENTACLE_ITEM_PATTERN);
   if (!match) return false;
@@ -161,6 +162,7 @@ export const handleDeckTentacleItemRoute: ApiRouteHandler = async (
     return true;
   }
 
+  runtime.broadcastDeckChanged();
   writeNoContent(response, 204, corsOrigin);
   return true;
 };
@@ -195,7 +197,7 @@ const DECK_TENTACLE_SKILLS_PATTERN = /^\/api\/deck\/tentacles\/([^/]+)\/skills$/
 
 export const handleDeckTentacleSkillsRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
-  { workspaceCwd, projectStateDir },
+  { runtime, workspaceCwd, projectStateDir },
 ) => {
   const match = requestUrl.pathname.match(DECK_TENTACLE_SKILLS_PATTERN);
   if (!match) return false;
@@ -229,6 +231,7 @@ export const handleDeckTentacleSkillsRoute: ApiRouteHandler = async (
     return true;
   }
 
+  runtime.broadcastDeckChanged();
   writeJson(response, 200, updated, corsOrigin);
   return true;
 };

@@ -1,0 +1,36 @@
+# Example systemd user unit for running Octogent as a long-lived service.
+# Copy to ~/.config/systemd/user/octogent.service and edit the placeholders
+# below before enabling. See docs/reference/systemd.md for full instructions.
+
+[Unit]
+Description=Octogent dashboard and API
+After=network.target
+
+[Service]
+# systemd user services do not load your shell profile, so PATH-dependent
+# launchers (especially nvm-managed installs) will not resolve. Run
+# `which octogent` in your normal shell and paste the absolute path here.
+ExecStart=/absolute/path/to/octogent
+
+# The octogent launcher is a Node script with a `#!/usr/bin/env node` shebang,
+# so `node` must also be resolvable. If node is not in a system location
+# (e.g. it is managed by nvm), uncomment and adjust the PATH line below to
+# include the directory that `which node` prints.
+#Environment=PATH=%h/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/usr/bin:/bin
+
+# Octogent serves the project in its working directory. Point this at the
+# repository you want the dashboard to manage (%h expands to your home dir).
+WorkingDirectory=%h/your-project
+
+# Uncomment to allow access from other machines (binds 0.0.0.0 and relaxes
+# host/origin checks — only do this on trusted networks).
+#Environment=OCTOGENT_ALLOW_REMOTE_ACCESS=1
+
+# Uncomment to override the listen port (default: 8787).
+#Environment=OCTOGENT_API_PORT=8787
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

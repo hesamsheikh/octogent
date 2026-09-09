@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { DEFAULT_LOCALE, type Locale } from "@octogent/core";
 import { buildUiStateUrl } from "../../runtime/runtimeEndpoints";
 import type { PrimaryNavIndex } from "../constants";
 import { MIN_SIDEBAR_WIDTH, PRIMARY_NAV_ITEMS, UI_STATE_SAVE_DEBOUNCE_MS } from "../constants";
@@ -10,7 +11,11 @@ import {
 } from "../notificationSounds";
 import { retainActiveTerminalEntries, retainActiveTerminalIds } from "../terminalState";
 import type { FrontendUiStateSnapshot, TerminalView } from "../types";
-import { clampSidebarWidth, normalizeFrontendUiStateSnapshot } from "../uiStateNormalizers";
+import {
+  NAV_SCHEMA_VERSION,
+  clampSidebarWidth,
+  normalizeFrontendUiStateSnapshot,
+} from "../uiStateNormalizers";
 
 type UsePersistedUiStateOptions = {
   columns: TerminalView;
@@ -75,6 +80,7 @@ const buildPersistedUiStateSnapshot = ({
   isClaudeUsageSectionExpanded,
   isCodexUsageSectionExpanded,
   terminalCompletionSound,
+  locale,
   minimizedTerminalIds,
   terminalWidths,
   canvasOpenTerminalIds,
@@ -93,6 +99,7 @@ const buildPersistedUiStateSnapshot = ({
   isClaudeUsageSectionExpanded: boolean;
   isCodexUsageSectionExpanded: boolean;
   terminalCompletionSound: TerminalCompletionSoundId;
+  locale: Locale;
   minimizedTerminalIds: string[];
   terminalWidths: Record<string, number>;
   canvasOpenTerminalIds: string[];
@@ -100,6 +107,9 @@ const buildPersistedUiStateSnapshot = ({
   canvasTerminalsPanelWidth: number | null;
 }): FrontendUiStateSnapshot => ({
   activePrimaryNav,
+  // Persist the schema stamp, or the server-side copy looks unmigrated and the
+  // nav index gets shifted again on every reload.
+  navSchemaVersion: NAV_SCHEMA_VERSION,
   isAgentsSidebarVisible,
   sidebarWidth: clampSidebarWidth(sidebarWidth),
   isActiveAgentsSectionExpanded,
@@ -111,6 +121,7 @@ const buildPersistedUiStateSnapshot = ({
   isClaudeUsageSectionExpanded,
   isCodexUsageSectionExpanded,
   terminalCompletionSound,
+  locale,
   minimizedTerminalIds,
   terminalWidths,
   canvasOpenTerminalIds,
@@ -135,6 +146,7 @@ const areUiStateSnapshotsEqual = (
   left.isClaudeUsageSectionExpanded === right.isClaudeUsageSectionExpanded &&
   left.isCodexUsageSectionExpanded === right.isCodexUsageSectionExpanded &&
   left.terminalCompletionSound === right.terminalCompletionSound &&
+  left.locale === right.locale &&
   areStringArraysEqual(left.minimizedTerminalIds, right.minimizedTerminalIds) &&
   areNumberRecordMapsEqual(left.terminalWidths, right.terminalWidths) &&
   areStringArraysEqual(left.canvasOpenTerminalIds, right.canvasOpenTerminalIds) &&
@@ -169,6 +181,8 @@ type UsePersistedUiStateResult = {
   setIsCodexUsageSectionExpanded: Dispatch<SetStateAction<boolean>>;
   terminalCompletionSound: TerminalCompletionSoundId;
   setTerminalCompletionSound: Dispatch<SetStateAction<TerminalCompletionSoundId>>;
+  locale: Locale;
+  setLocale: Dispatch<SetStateAction<Locale>>;
   minimizedTerminalIds: string[];
   setMinimizedTerminalIds: Dispatch<SetStateAction<string[]>>;
   terminalWidths: Record<string, number>;
@@ -217,6 +231,7 @@ export const usePersistedUiState = ({
   const [terminalCompletionSound, setTerminalCompletionSound] = useState<TerminalCompletionSoundId>(
     DEFAULT_TERMINAL_COMPLETION_SOUND,
   );
+  const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE);
   const [isUiStateHydrated, setIsUiStateHydrated] = useState(false);
   const [hasHydratedUiStateSnapshot, setHasHydratedUiStateSnapshot] = useState(false);
   const [minimizedTerminalIds, setMinimizedTerminalIds] = useState<string[]>(
@@ -281,6 +296,7 @@ export const usePersistedUiState = ({
           isClaudeUsageSectionExpanded: DEFAULT_IS_CLAUDE_USAGE_SECTION_EXPANDED,
           isCodexUsageSectionExpanded: DEFAULT_IS_CODEX_USAGE_SECTION_EXPANDED,
           terminalCompletionSound: DEFAULT_TERMINAL_COMPLETION_SOUND,
+          locale: DEFAULT_LOCALE,
           minimizedTerminalIds: DEFAULT_MINIMIZED_TERMINAL_IDS,
           terminalWidths: DEFAULT_TERMINAL_WIDTHS,
           canvasOpenTerminalIds: DEFAULT_CANVAS_OPEN_TERMINAL_IDS,
@@ -328,6 +344,7 @@ export const usePersistedUiState = ({
           snapshot.isCodexUsageSectionExpanded ?? DEFAULT_IS_CODEX_USAGE_SECTION_EXPANDED,
         terminalCompletionSound:
           snapshot.terminalCompletionSound ?? DEFAULT_TERMINAL_COMPLETION_SOUND,
+        locale: (snapshot.locale as Locale) ?? DEFAULT_LOCALE,
         minimizedTerminalIds: nextMinimizedTerminalIds,
         terminalWidths: nextTerminalWidths,
         canvasOpenTerminalIds: nextCanvasOpenTerminalIds,
@@ -387,6 +404,10 @@ export const usePersistedUiState = ({
         setTerminalCompletionSound(snapshot.terminalCompletionSound);
       }
 
+      if (snapshot.locale) {
+        setLocale(snapshot.locale as Locale);
+      }
+
       if (snapshot.minimizedTerminalIds) {
         setMinimizedTerminalIds(nextMinimizedTerminalIds);
       }
@@ -419,6 +440,37 @@ export const usePersistedUiState = ({
     setCanvasOpenTentacleIds((current) => retainActiveTerminalIds(current, activeTentacleIds));
   }, [columns]);
 
+  // Flush pending UI state synchronously on tab close so the debounce window
+  // cannot cause state loss when the user navigates away mid-debounce. A
+  // keepalive fetch survives the page unload like a beacon would, but keeps
+  // the PATCH method the /api/ui-state endpoint expects (sendBeacon can only
+  // POST, which that route rejects with 405).
+  const pendingUiStateRef = useRef<FrontendUiStateSnapshot | null>(null);
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const pending = pendingUiStateRef.current;
+      if (!pending) {
+        return;
+      }
+      void fetch(buildUiStateUrl(), {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(pending),
+        keepalive: true,
+      }).catch(() => {
+        // The page is going away — nothing useful to do with a failure.
+      });
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isUiStateHydrated) {
       return;
@@ -437,6 +489,7 @@ export const usePersistedUiState = ({
       isClaudeUsageSectionExpanded,
       isCodexUsageSectionExpanded,
       terminalCompletionSound,
+      locale,
       minimizedTerminalIds,
       terminalWidths,
       canvasOpenTerminalIds,
@@ -445,8 +498,11 @@ export const usePersistedUiState = ({
     });
 
     if (areUiStateSnapshotsEqual(lastPersistedUiStateRef.current, payload)) {
+      pendingUiStateRef.current = null;
       return;
     }
+
+    pendingUiStateRef.current = payload;
 
     const timerId = window.setTimeout(() => {
       void fetch(buildUiStateUrl(), {
@@ -462,6 +518,7 @@ export const usePersistedUiState = ({
             throw new Error(`Unexpected status ${response.status}`);
           }
           lastPersistedUiStateRef.current = payload;
+          pendingUiStateRef.current = null;
         })
         .catch((error: unknown) => {
           console.warn("[ui-state] Failed to persist UI state:", error);
@@ -489,6 +546,7 @@ export const usePersistedUiState = ({
     minimizedTerminalIds,
     sidebarWidth,
     terminalCompletionSound,
+    locale,
     terminalWidths,
   ]);
 
@@ -520,6 +578,8 @@ export const usePersistedUiState = ({
     setIsCodexUsageSectionExpanded,
     terminalCompletionSound,
     setTerminalCompletionSound,
+    locale,
+    setLocale,
     minimizedTerminalIds,
     setMinimizedTerminalIds,
     terminalWidths,

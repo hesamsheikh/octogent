@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DeleteAllTerminalsDialog } from "../src/components/canvas/DeleteAllTerminalsDialog";
+import { renderWithLocale } from "./test-utils/renderWithLocale";
 
 describe("DeleteAllTerminalsDialog", () => {
   afterEach(() => {
@@ -30,7 +31,7 @@ describe("DeleteAllTerminalsDialog", () => {
       return new Response("not-found", { status: 404 });
     });
 
-    render(
+    renderWithLocale(
       <DeleteAllTerminalsDialog
         columns={[
           {

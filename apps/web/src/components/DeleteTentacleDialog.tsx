@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { PendingDeleteTerminal } from "../app/hooks/useTerminalMutations";
+import { useT } from "../app/providers/LocaleProvider";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 
 type DeleteTentacleDialogProps = {
@@ -16,6 +17,7 @@ export const DeleteTentacleDialog = ({
   onCancel,
   onConfirmDelete,
 }: DeleteTentacleDialogProps) => {
+  const t = useT();
   const [cleanupConfirmationInput, setCleanupConfirmationInput] = useState("");
   const isCleanupIntent =
     pendingDeleteTerminal.intent === "cleanup-worktree" &&
@@ -36,71 +38,62 @@ export const DeleteTentacleDialog = ({
     <ConfirmationDialog
       title={
         isCleanupIntent
-          ? "Cleanup Worktree Tentacle"
+          ? t("web.dialog.delete.cleanupTitle")
           : isCloseIntent
-            ? "Close Terminal"
-            : "Delete Tentacle"
+            ? t("web.dialog.delete.closeTitle")
+            : t("web.dialog.delete.deleteTitle")
       }
-      ariaLabel={`${isCloseIntent ? "Close" : "Delete"} confirmation for ${pendingDeleteTerminal.terminalId}`}
+      ariaLabel={`${isCloseIntent ? t("common.close") : t("common.delete")} confirmation for ${pendingDeleteTerminal.terminalId}`}
       message={
         isCleanupIntent ? (
-          <>
-            Cleanup <strong>{pendingDeleteTerminal.tentacleName}</strong> and delete the tentacle
-            session metadata.
-          </>
+          <>{t("web.dialog.delete.cleanupMessage", { name: pendingDeleteTerminal.tentacleName })}</>
         ) : isCloseIntent ? (
-          <>
-            Close <strong>{pendingDeleteTerminal.tentacleName}</strong> and terminate its active
-            terminal session.
-          </>
+          <>{t("web.dialog.delete.closeMessage", { name: pendingDeleteTerminal.tentacleName })}</>
         ) : (
-          <>
-            Delete <strong>{pendingDeleteTerminal.tentacleName}</strong> and terminate all of its
-            active sessions.
-          </>
+          <>{t("web.dialog.delete.deleteMessage", { name: pendingDeleteTerminal.tentacleName })}</>
         )
       }
       warning={
         isCleanupIntent
-          ? "This action removes the worktree directory and local branch."
+          ? t("web.dialog.delete.cleanupWarning")
           : isCloseIntent
-            ? "The transcript is preserved as an inactive session."
-            : "This action cannot be undone."
+            ? t("web.dialog.delete.closeWarning")
+            : t("web.dialog.clearConversations.warning")
       }
       confirmLabel={
         isThisDeleting
-          ? "Closing..."
+          ? t("web.dialog.delete.closing")
           : isCleanupIntent
             ? "Cleanup"
             : isCloseIntent
-              ? "Close"
-              : "Delete"
+              ? t("common.close")
+              : t("common.delete")
       }
       isConfirmDisabled={isDeleting || !isCleanupConfirmationValid}
       isBusy={isDeleting}
-      cancelAriaLabel="Cancel delete"
+      cancelAriaLabel={t("common.cancel")}
       onCancel={onCancel}
       onConfirm={onConfirmDelete}
     >
       <dl className="delete-confirm-details">
         <div>
-          <dt>Name</dt>
+          <dt>{t("common.name")}</dt>
           <dd>{pendingDeleteTerminal.tentacleName}</dd>
         </div>
         <div>
-          <dt>ID</dt>
+          <dt>{t("common.id")}</dt>
           <dd>{pendingDeleteTerminal.terminalId}</dd>
         </div>
         <div>
-          <dt>Mode</dt>
+          <dt>{t("web.dialog.delete.mode")}</dt>
           <dd>{pendingDeleteTerminal.workspaceMode === "worktree" ? "worktree" : "shared"}</dd>
         </div>
       </dl>
       {isCleanupIntent && (
         <div className="delete-confirm-typed-check">
-          <label htmlFor="cleanup-confirm-id-input">Type tentacle ID to confirm cleanup</label>
+          <label htmlFor="cleanup-confirm-id-input">{t("web.dialog.delete.typeToConfirm")}</label>
           <input
-            aria-label="Type tentacle ID to confirm cleanup"
+            aria-label={t("web.dialog.delete.typeToConfirm")}
             id="cleanup-confirm-id-input"
             onChange={(event) => setCleanupConfirmationInput(event.target.value)}
             type="text"

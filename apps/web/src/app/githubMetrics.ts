@@ -1,28 +1,39 @@
+import { t } from "@octogent/core";
+import type { Locale } from "@octogent/core";
 import { GITHUB_COMMIT_SERIES_LENGTH } from "./constants";
 import type { GitHubCommitPoint, GitHubCommitSparkPoint, GitHubRepoSummarySnapshot } from "./types";
 
-export const formatGitHubCommitHoverLabel = (point: GitHubCommitPoint) => {
+export const formatGitHubCommitHoverLabel = (point: GitHubCommitPoint, locale: Locale = "en") => {
   if (point.date.startsWith("n/a-")) {
-    return point.count === 1 ? "No date · 1 commit" : `No date · ${point.count} commits`;
+    if (point.count === 1) {
+      return t(locale, "web.github.commitDateCount", { date: "No date", count: point.count });
+    }
+    return t(locale, "web.github.commitDateCountPlural", { date: "No date", count: point.count });
   }
 
-  return point.count === 1 ? `${point.date} · 1 commit` : `${point.date} · ${point.count} commits`;
+  if (point.count === 1) {
+    return t(locale, "web.github.commitDateCount", { date: point.date, count: point.count });
+  }
+  return t(locale, "web.github.commitDateCountPlural", { date: point.date, count: point.count });
 };
 
-export const buildGitHubStatusPill = (summary: GitHubRepoSummarySnapshot | null) => {
+export const buildGitHubStatusPill = (
+  summary: GitHubRepoSummarySnapshot | null,
+  locale: Locale = "en",
+) => {
   if (!summary) {
-    return "GitHub loading";
+    return t(locale, "web.github.statusPill.loading");
   }
 
   if (summary.status === "ok") {
-    return "GitHub live";
+    return t(locale, "web.github.statusPill.live");
   }
 
   if (summary.status === "unavailable") {
-    return "GitHub unavailable";
+    return t(locale, "web.github.statusPill.unavailable");
   }
 
-  return "GitHub error";
+  return t(locale, "web.github.statusPill.error");
 };
 
 export const buildGitHubCommitSeries = (summary: GitHubRepoSummarySnapshot | null) => {

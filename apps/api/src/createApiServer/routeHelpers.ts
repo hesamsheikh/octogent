@@ -5,6 +5,7 @@ import type { ClaudeUsageSnapshot } from "../claudeUsage";
 import type { CodeIntelStore } from "../codeIntelStore";
 import type { CodexUsageSnapshot } from "../codexUsage";
 import type { GitHubRepoSummarySnapshot } from "../githubRepoSummary";
+import type { HealthSnapshot } from "../healthSnapshot";
 import type { MonitorService } from "../monitor";
 import { RequestBodyTooLargeError, readJsonBody } from "./requestParsers";
 import { withCors } from "./security";
@@ -28,6 +29,7 @@ export type RouteHandlerDependencies = {
   monitorService: MonitorService;
   invalidateClaudeUsageCache: () => void;
   codeIntelStore: CodeIntelStore;
+  readHealthSnapshot: () => HealthSnapshot;
 };
 
 export type RouteHandlerContext = {

@@ -10,12 +10,14 @@ Octogent has three main layers:
 
 ## Start here
 
+- [Get Work Done](guides/getting-work-done.md) walks through your first dispatch, reviewed result, and merge in about ten minutes
 - [Installation](getting-started/installation.md)
 - [Quickstart](getting-started/quickstart.md)
 - [Mental Model](concepts/mental-model.md) explains the boundaries between tentacles, terminals, worktrees, and runtime state
 
 ## Concepts
 
+- [Mental Model](concepts/mental-model.md) explains the boundaries between tentacles, terminals, worktrees, and runtime state
 - [Tentacles](concepts/tentacles.md) explains the file-backed context model and how Deck reads it
 - [Runtime and API](concepts/runtime-and-api.md) explains terminal lifecycle, WebSockets, hooks, persistence, and restart behavior
 
@@ -31,6 +33,7 @@ Octogent has three main layers:
 - [Filesystem Layout](reference/filesystem-layout.md)
 - [API](reference/api.md)
 - [Experimental Features](reference/experimental-features.md)
+- [Running as a systemd User Service](reference/systemd.md)
 - [Troubleshooting](reference/troubleshooting.md)
 
 ## Contributor policy

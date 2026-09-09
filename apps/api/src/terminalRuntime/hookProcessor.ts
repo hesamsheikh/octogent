@@ -2,9 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { logVerbose } from "../logging";
-import { parseClaudeTranscript } from "./claudeTranscript";
+import { parseClaudeTranscript, readClaudeTranscriptModel } from "./claudeTranscript";
+import { OCTOGENT_MANAGED_WORKTREE_PATHS } from "./completionDetection";
 import { storeClaudeTranscriptTurns } from "./conversations";
+import { ensureGitExcludeEntries } from "./gitExclude";
+import { mergeHookEntries, parseSettingsObject } from "./hookSettingsMerge";
 import { broadcastMessage } from "./protocol";
+import { resolveTerminalReleaseAfterTurn } from "./releaseAfterTurn";
 import type { PersistedTerminal, TerminalSession } from "./types";
 
 const MAX_AUTO_NAME_LENGTH = 50;
@@ -29,6 +33,13 @@ export const createHookProcessor = (deps: {
   persistRegistry: () => void;
   deliverChannelMessages: (terminalId: string) => number;
   releaseSessionKeepAlive: (terminalId: string) => boolean;
+  reviveSessionTranscript: (terminalId: string) => boolean;
+  sendInitialPromptNow: (sessionId: string) => void;
+  acknowledgeInitialPrompt: (sessionId: string) => void;
+  evaluateSessionCompletion: (terminalId: string) => void;
+  recordToolUse?: (terminalId: string, toolName: string) => void;
+  /** Push a fresh snapshot to UI clients after a hook changed the record outside a lifecycle event. */
+  onTerminalUpdated?: (terminalId: string) => void;
   onStateChange?: (
     terminalId: string,
     state: TerminalSession["agentState"],
@@ -43,47 +54,36 @@ export const createHookProcessor = (deps: {
     persistRegistry,
     deliverChannelMessages,
     releaseSessionKeepAlive,
+    reviveSessionTranscript,
+    sendInitialPromptNow,
+    acknowledgeInitialPrompt,
+    evaluateSessionCompletion,
+    recordToolUse,
+    onTerminalUpdated,
     onStateChange,
   } = deps;
 
-  const parseSettingsObject = (fileContents: string): Record<string, unknown> | null => {
-    try {
-      const parsed = JSON.parse(fileContents) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return null;
-      }
-      return parsed as Record<string, unknown>;
-    } catch {
-      return null;
+  // Hook payloads never say which model answered; the Claude transcript does.
+  // Read it once per terminal so a terminal created without --model still
+  // shows what is actually working.
+  const noteObservedModel = (terminalId: string, hookPayload: Record<string, unknown>) => {
+    const terminal = terminals.get(terminalId);
+    if (!terminal || terminal.agentModelObserved || terminal.agentProvider === "codex") {
+      return;
     }
-  };
-
-  const mergeHookEntries = (
-    existingValue: unknown,
-    eventName: string,
-    nextEntries: unknown[],
-  ): Record<string, unknown> => {
-    const nextHooks =
-      existingValue && typeof existingValue === "object" && !Array.isArray(existingValue)
-        ? { ...(existingValue as Record<string, unknown>) }
-        : {};
-    const existingEntries = Array.isArray(nextHooks[eventName])
-      ? [...(nextHooks[eventName] as unknown[])]
-      : [];
-    const mergedEntries = [...existingEntries];
-
-    for (const nextEntry of nextEntries) {
-      const serializedNextEntry = JSON.stringify(nextEntry);
-      const alreadyPresent = existingEntries.some(
-        (existingEntry) => JSON.stringify(existingEntry) === serializedNextEntry,
-      );
-      if (!alreadyPresent) {
-        mergedEntries.push(nextEntry);
-      }
+    const transcriptPath =
+      typeof hookPayload.transcript_path === "string" ? hookPayload.transcript_path : null;
+    if (!transcriptPath) {
+      return;
     }
-
-    nextHooks[eventName] = mergedEntries;
-    return nextHooks;
+    const model = readClaudeTranscriptModel(transcriptPath);
+    if (model) {
+      terminal.agentModelObserved = model;
+      persistRegistry();
+      // No lifecycle event accompanies this, so the flow card would otherwise
+      // keep saying "default model" until the next unrelated update.
+      onTerminalUpdated?.(terminalId);
+    }
   };
 
   const installHooksInDirectory = (targetCwd: string) => {
@@ -195,6 +195,12 @@ export const createHookProcessor = (deps: {
 
       mergedSettings.hooks = mergedHooks;
       writeFileSync(targetSettingsPath, `${JSON.stringify(mergedSettings, null, 2)}\n`, "utf8");
+      // Keep our file out of `git status` for the agent and the operator in
+      // repositories that do not ignore `.claude/` themselves.
+      ensureGitExcludeEntries(
+        targetCwd,
+        [...OCTOGENT_MANAGED_WORKTREE_PATHS].map((path) => `/${path}`),
+      );
     } catch {
       // Best-effort
     }
@@ -214,6 +220,19 @@ export const createHookProcessor = (deps: {
     }
 
     const hookPayloadRecord = payload as Record<string, unknown>;
+
+    if (hookName === "session-start") {
+      if (!octogentSessionId) {
+        return { ok: true };
+      }
+      sendInitialPromptNow(octogentSessionId);
+      // A new agent came up in this PTY. Reopen the transcript if the previous
+      // agent closed it, then hand over anything that queued up in between.
+      if (reviveSessionTranscript(octogentSessionId)) {
+        deliverChannelMessages(octogentSessionId);
+      }
+      return { ok: true };
+    }
 
     if (hookName === "notification") {
       if (!octogentSessionId) {
@@ -254,6 +273,39 @@ export const createHookProcessor = (deps: {
       return { ok: true };
     }
 
+    if (hookName === "permission-request") {
+      // Codex reports pending approvals through a dedicated PermissionRequest
+      // event instead of Claude's Notification/permission_prompt; only codex
+      // terminals may take this path.
+      if (!octogentSessionId || terminals.get(octogentSessionId)?.agentProvider !== "codex") {
+        return { ok: true };
+      }
+      const session = sessions.get(octogentSessionId);
+      if (!session) {
+        logVerbose(`[Hook] permission-request: no session for ${octogentSessionId}, skipping.`);
+        return { ok: true };
+      }
+
+      const toolName =
+        typeof hookPayloadRecord.tool_name === "string" ? hookPayloadRecord.tool_name : null;
+      if (toolName) {
+        session.lastToolName = toolName;
+      }
+
+      logVerbose(`[Hook] permission-request: tool=${toolName} session=${octogentSessionId}`);
+
+      session.agentState = "waiting_for_permission";
+      session.stateTracker.forceState("waiting_for_permission");
+      onStateChange?.(octogentSessionId, "waiting_for_permission", session.lastToolName);
+      broadcastMessage(session, {
+        type: "state",
+        state: "waiting_for_permission",
+        ...(session.lastToolName ? { toolName: session.lastToolName } : {}),
+      });
+
+      return { ok: true };
+    }
+
     if (hookName === "pre-tool-use") {
       if (!octogentSessionId) {
         return { ok: true };
@@ -270,7 +322,9 @@ export const createHookProcessor = (deps: {
 
       if (toolName) {
         session.lastToolName = toolName;
+        recordToolUse?.(octogentSessionId, toolName);
       }
+      noteObservedModel(octogentSessionId, hookPayloadRecord);
 
       if (toolName === "AskUserQuestion") {
         session.agentState = "waiting_for_user";
@@ -293,7 +347,9 @@ export const createHookProcessor = (deps: {
       }
 
       // Update last-active timestamp (determines active/inactive on the canvas).
+      acknowledgeInitialPrompt(octogentSessionId);
       terminal.lastActiveAt = new Date().toISOString();
+      noteObservedModel(terminal.terminalId, hookPayloadRecord);
 
       // The user submitted a prompt, so the agent is about to start processing.
       // Transition state out of waiting/idle to processing immediately.
@@ -361,8 +417,15 @@ export const createHookProcessor = (deps: {
       return { ok: true };
     }
 
+    // Codex writes its own rollout-format JSONL at transcript_path, which the
+    // Claude parser cannot read; rely on last_assistant_message alone there.
+    const isCodexSession = terminals.get(matchedSessionId)?.agentProvider === "codex";
+    if (!isCodexSession) {
+      noteObservedModel(matchedSessionId, hookPayload);
+    }
+
     logVerbose(`[Hook] Matched session: ${matchedSessionId}, parsing transcript...`);
-    const turns = parseClaudeTranscript(transcriptPath);
+    const turns = isCodexSession ? null : parseClaudeTranscript(transcriptPath);
     logVerbose(`[Hook] Parsed ${turns?.length ?? 0} turns from transcript.`);
 
     const lastAssistantMessage =
@@ -395,10 +458,40 @@ export const createHookProcessor = (deps: {
       logVerbose(`[Hook] Stored ${turns.length} turns for session ${matchedSessionId}.`);
     }
 
+    // The turn is over: decide whether this terminal's work is now finished.
+    if (matchedSessionId) {
+      evaluateSessionCompletion(matchedSessionId);
+    }
+
+    // Codex has no idle_prompt notification, so a codex session never returns
+    // to idle on its own; force it here — before delivery, whose idle gate
+    // would otherwise stay closed forever.
+    if (isCodexSession && matchedSessionId) {
+      const session = sessions.get(matchedSessionId);
+      if (session) {
+        session.agentState = "idle";
+        session.stateTracker.forceState("idle");
+        onStateChange?.(matchedSessionId, "idle");
+        broadcastMessage(session, { type: "state", state: "idle" });
+      }
+    }
+
     // Deliver any queued channel messages now that the agent is idle.
     if (matchedSessionId) {
       const deliveredMessageCount = deliverChannelMessages(matchedSessionId);
-      if (deliveredMessageCount === 0) {
+      const terminal = terminals.get(matchedSessionId);
+      const lifecycleState = terminal?.lifecycleState;
+      // A dispatched worker's Stop ends a turn, not the dialogue. Only proven
+      // merged work is finished; shared workers may receive follow-up messages.
+      const keepDispatchedWorkerAlive =
+        Boolean(terminal?.initialPrompt) &&
+        !resolveTerminalReleaseAfterTurn(process.env.OCTOGENT_TERMINAL_RELEASE_AFTER_TURN) &&
+        !(terminal?.workspaceMode === "worktree" && lifecycleState === "completed");
+      if (
+        deliveredMessageCount === 0 &&
+        lifecycleState !== "awaiting-review" &&
+        !keepDispatchedWorkerAlive
+      ) {
         releaseSessionKeepAlive(matchedSessionId);
       }
     }

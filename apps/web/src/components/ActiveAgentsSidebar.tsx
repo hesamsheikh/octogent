@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { ReactNode } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
 import { clampSidebarWidth } from "../app/uiStateNormalizers";
 
 type ActiveAgentsSidebarProps = {
@@ -17,6 +18,7 @@ export const ActiveAgentsSidebar = ({
   actionPanel = null,
   bodyContent,
 }: ActiveAgentsSidebarProps) => {
+  const t = useT();
   const sidebarRef = useRef<HTMLElement | null>(null);
 
   const handleResizeMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -39,7 +41,7 @@ export const ActiveAgentsSidebar = ({
   return (
     <div className="dashboard-deck-shell">
       <aside
-        aria-label="Active Agents sidebar"
+        aria-label={t("web.a11y.activeAgentsSidebar")}
         className="active-agents-sidebar"
         ref={sidebarRef}
         style={{ width: `${sidebarWidth}px` }}

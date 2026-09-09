@@ -56,6 +56,7 @@ describe("App UI state persistence", () => {
 
       if (url.endsWith("/api/ui-state") && method === "GET") {
         return jsonResponse({
+          locale: "en",
           activePrimaryNav: 8,
           isRuntimeStatusStripVisible: false,
           isMonitorVisible: false,

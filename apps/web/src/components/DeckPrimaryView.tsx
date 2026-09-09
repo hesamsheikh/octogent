@@ -7,6 +7,7 @@ import type {
   WorkspaceSetupStepId,
 } from "@octogent/core";
 import { useClickOutside } from "../app/hooks/useClickOutside";
+import { useT } from "../app/providers/LocaleProvider";
 import type { TerminalAgentProvider } from "../app/types";
 import {
   buildDeckSkillsUrl,
@@ -52,6 +53,7 @@ type FocusState =
 type EmptyViewMode = "idle" | "adding";
 
 type DeckPrimaryViewProps = {
+  deckRevision?: number;
   onSidebarContent?: ((content: ReactNode) => void) | undefined;
   workspaceSetup: WorkspaceSetupSnapshot | null;
   isWorkspaceSetupLoading: boolean;
@@ -62,6 +64,7 @@ type DeckPrimaryViewProps = {
 };
 
 export const DeckPrimaryView = ({
+  deckRevision,
   onSidebarContent,
   workspaceSetup,
   isWorkspaceSetupLoading,
@@ -70,6 +73,7 @@ export const DeckPrimaryView = ({
   onRunWorkspaceSetupStep,
   suppressWorkspaceSetupCard = false,
 }: DeckPrimaryViewProps) => {
+  const t = useT();
   const [tentacles, setTentacles] = useState<DeckTentacleSummary[]>([]);
   const [focus, setFocus] = useState<FocusState | null>(null);
   const [vaultContent, setVaultContent] = useState<string | null>(null);
@@ -112,6 +116,14 @@ export const DeckPrimaryView = ({
   useEffect(() => {
     void fetchTentacles();
   }, [fetchTentacles]);
+
+  // Refetch when the server reports deck content changed outside this page.
+  const lastDeckRevision = useRef(deckRevision);
+  useEffect(() => {
+    if (lastDeckRevision.current === deckRevision) return;
+    lastDeckRevision.current = deckRevision;
+    void fetchTentacles();
+  }, [deckRevision, fetchTentacles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -427,7 +439,7 @@ export const DeckPrimaryView = ({
         className="deck-view"
         data-mode="grid"
         data-empty-mode={emptyViewMode}
-        aria-label="Deck"
+        aria-label={t("web.a11y.deck")}
       >
         <div className="deck-empty-state">
           <div className="deck-empty-left">
@@ -489,7 +501,7 @@ export const DeckPrimaryView = ({
       className="deck-view"
       data-mode={mode}
       data-has-pods={tentacles.length > 0}
-      aria-label="Deck"
+      aria-label={t("web.a11y.deck")}
     >
       <div className="deck-pods-container">
         {tentacles.map((t) => {
@@ -589,7 +601,7 @@ export const DeckPrimaryView = ({
               ) : vaultContent !== null ? (
                 <MarkdownContent content={vaultContent} className="deck-detail-markdown" />
               ) : (
-                <span className="deck-detail-loading">File not found.</span>
+                <span className="deck-detail-loading">{t("web.deck.fileNotFound")}</span>
               )}
             </div>
           </>

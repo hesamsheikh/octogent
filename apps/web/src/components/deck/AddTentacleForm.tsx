@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { DeckAvailableSkill } from "@octogent/core";
+import { useT } from "../../app/providers/LocaleProvider";
 import type { OctopusAccessory, OctopusAnimation, OctopusExpression } from "../EmptyOctopus";
 import { OctopusGlyph } from "../EmptyOctopus";
 import { ACCESSORIES, ANIMATIONS, EXPRESSIONS, OCTOPUS_COLORS } from "./octopusVisuals";
@@ -61,6 +62,7 @@ export const AddTentacleForm = ({
   error,
   availableSkills,
 }: AddTentacleFormProps) => {
+  const t = useT();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedColor, setSelectedColor] = useState(
@@ -117,9 +119,9 @@ export const AddTentacleForm = ({
     <form className="deck-add-form" onSubmit={handleSubmit}>
       <div className="deck-add-form-header">
         <button type="button" className="deck-add-form-back" onClick={onCancel}>
-          ← Back
+          ← {t("web.deck.addTentacle.back")}
         </button>
-        <span className="deck-add-form-title">New Tentacle</span>
+        <span className="deck-add-form-title">{t("web.deck.addTentacle.title")}</span>
       </div>
 
       <div className="deck-add-form-body">
@@ -135,31 +137,31 @@ export const AddTentacleForm = ({
         </div>
 
         <label className="deck-add-form-label">
-          Name
+          {t("web.deck.addTentacle.name")}
           <input
             ref={nameRef}
             type="text"
             className="deck-add-form-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Database Layer"
+            placeholder={t("web.deck.addTentacle.namePlaceholder")}
           />
         </label>
 
         <label className="deck-add-form-label">
-          Description
+          {t("web.deck.addTentacle.description")}
           <textarea
             className="deck-add-form-textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What this tentacle is responsible for..."
+            placeholder={t("web.deck.addTentacle.descPlaceholder")}
             rows={3}
           />
         </label>
 
         {availableSkills.length > 0 && (
           <div className="deck-add-form-label">
-            Suggested Skills
+            {t("web.deck.addTentacle.suggestedSkills")}
             <div className="deck-add-form-skills">
               {availableSkills.map((skill) => {
                 const checked = selectedSkills.includes(skill.name);
@@ -187,7 +189,7 @@ export const AddTentacleForm = ({
         )}
 
         <div className="deck-add-form-label">
-          Color
+          {t("web.deck.addTentacle.color")}
           <div className="deck-add-form-colors">
             {OCTOPUS_COLORS.map((c) => (
               <button
@@ -205,7 +207,7 @@ export const AddTentacleForm = ({
 
         <div className="deck-add-form-row">
           <div className="deck-add-form-label">
-            Expression
+            {t("web.deck.addTentacle.expression")}
             <div className="deck-add-form-chips">
               {EXPRESSION_OPTIONS.map((opt) => (
                 <button
@@ -215,13 +217,13 @@ export const AddTentacleForm = ({
                   data-selected={opt.value === selectedExpression ? "true" : "false"}
                   onClick={() => setSelectedExpression(opt.value)}
                 >
-                  {opt.label}
+                  {t(`web.deck.expression.${opt.value}`)}
                 </button>
               ))}
             </div>
           </div>
           <div className="deck-add-form-label">
-            Hair Style
+            {t("web.deck.addTentacle.hairStyle")}
             <div className="deck-add-form-chips">
               {ACCESSORY_OPTIONS.map((opt) => (
                 <button
@@ -231,13 +233,17 @@ export const AddTentacleForm = ({
                   data-selected={opt.value === selectedAccessory ? "true" : "false"}
                   onClick={() => setSelectedAccessory(opt.value)}
                 >
-                  {opt.label}
+                  {t(
+                    opt.value === "side-sweep"
+                      ? "web.deck.hair.sideSweep"
+                      : `web.deck.hair.${opt.value}`,
+                  )}
                 </button>
               ))}
             </div>
           </div>
           <div className="deck-add-form-label">
-            Hair Color
+            {t("web.deck.addTentacle.hairColor")}
             <div className="deck-add-form-colors">
               {HAIR_COLORS.map((c) => (
                 <button
@@ -261,7 +267,7 @@ export const AddTentacleForm = ({
           className="deck-add-form-submit"
           disabled={isSubmitting || name.trim().length === 0}
         >
-          {isSubmitting ? "Creating..." : "Create Tentacle"}
+          {isSubmitting ? t("web.deck.addTentacle.creating") : t("web.deck.addTentacle.create")}
         </button>
       </div>
     </form>

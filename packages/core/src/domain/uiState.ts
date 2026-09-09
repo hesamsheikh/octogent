@@ -1,6 +1,8 @@
+import type { Locale } from "../i18n";
 import type { TerminalCompletionSoundId } from "./completionSound";
 
 export type PersistedUiState = {
+  navSchemaVersion?: number;
   activePrimaryNav?: number;
   isAgentsSidebarVisible?: boolean;
   sidebarWidth?: number;
@@ -19,4 +21,5 @@ export type PersistedUiState = {
   canvasOpenTentacleIds?: string[];
   canvasTerminalsPanelWidth?: number;
   terminalInactivityThresholdMs?: number;
+  locale?: string;
 };

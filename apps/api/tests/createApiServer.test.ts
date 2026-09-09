@@ -407,6 +407,8 @@ describe("createApiServer", () => {
     temporaryDirectories.length = 0;
   });
 
+  const REGISTRY_PERSIST_BUDGET_MS = 8_000;
+
   const startServer = async (options: Partial<Parameters<typeof createApiServer>[0]> = {}) => {
     const workspaceCwd =
       options.workspaceCwd ??
@@ -435,20 +437,33 @@ describe("createApiServer", () => {
     predicate: (document: TDocument) => boolean,
   ): Promise<TDocument> => {
     const registryPath = join(workspaceCwd, ".octogent", "state", "tentacles.json");
-    const timeoutAt = Date.now() + 2_000;
+    // Persistence lands in ~100ms idle; the budget absorbs IO stalls when the
+    // whole monorepo suite runs in parallel, and only slows a genuine failure.
+    const timeoutAt = Date.now() + REGISTRY_PERSIST_BUDGET_MS;
+    let lastSeen: string | null = null;
 
     while (Date.now() < timeoutAt) {
       if (existsSync(registryPath)) {
-        const document = JSON.parse(readFileSync(registryPath, "utf8")) as TDocument;
-        if (predicate(document)) {
-          return document;
+        lastSeen = readFileSync(registryPath, "utf8");
+        try {
+          const document = JSON.parse(lastSeen) as TDocument;
+          if (predicate(document)) {
+            return document;
+          }
+        } catch {
+          // The registry write is not atomic, so a poll can observe a
+          // half-written file. Treat it as "not persisted yet" and keep polling.
         }
       }
 
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    throw new Error(`Timed out waiting for registry persistence at ${registryPath}`);
+    // Report what the registry actually held so a rare timeout is diagnosable
+    // from CI output alone.
+    throw new Error(
+      `Timed out after ${REGISTRY_PERSIST_BUDGET_MS}ms waiting for registry persistence at ${registryPath}. Last contents: ${lastSeen ?? "<file never appeared>"}`,
+    );
   };
 
   const writeConversationTranscript = (
@@ -1240,6 +1255,41 @@ describe("createApiServer", () => {
     });
 
     expect(response.status).toBe(405);
+  });
+
+  it("round-trips persisted fields through /api/ui-state", async () => {
+    // If any layer strips this field, the client replays the nav-index
+    // migration on every load and the restored page shifts by one per refresh.
+    const baseUrl = await startServer();
+
+    const patchResponse = await fetch(`${baseUrl}/api/ui-state`, {
+      method: "PATCH",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        activePrimaryNav: 1,
+        navSchemaVersion: 2,
+        locale: "zh-CN",
+        terminalInactivityThresholdMs: 120_000,
+      }),
+    });
+    expect(patchResponse.status).toBe(200);
+
+    const readResponse = await fetch(`${baseUrl}/api/ui-state`, {
+      headers: { Accept: "application/json" },
+    });
+    const payload = (await readResponse.json()) as {
+      activePrimaryNav?: number;
+      navSchemaVersion?: number;
+      locale?: string;
+      terminalInactivityThresholdMs?: number;
+    };
+    expect(payload.activePrimaryNav).toBe(1);
+    expect(payload.navSchemaVersion).toBe(2);
+    expect(payload.locale).toBe("zh-CN");
+    expect(payload.terminalInactivityThresholdMs).toBe(120_000);
   });
 
   it("reports file-backed workspace setup status and updates it through setup actions", async () => {
@@ -2662,7 +2712,7 @@ describe("createApiServer", () => {
       }),
     );
 
-    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1?removeWorktree=true`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",
@@ -2671,6 +2721,28 @@ describe("createApiServer", () => {
     expect(deleteResponse.status).toBe(204);
     expect(gitClient.getWorktree(expectedWorktreePath)).toBeNull();
     expect(gitClient.hasBranch("octogent/terminal-1")).toBe(false);
+  });
+
+  it("keeps the worktree on a plain delete and reclaims it only on request", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    const gitClient = new FakeGitClient();
+    const baseUrl = await startServer({ workspaceCwd, gitClient });
+
+    await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceMode: "worktree" }),
+    });
+    const expectedWorktreePath = join(workspaceCwd, ".octogent", "worktrees", "terminal-1");
+
+    // Plain delete: record gone, worktree still on disk (the iron rule).
+    const plain = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    expect(plain.status).toBe(204);
+    expect(gitClient.getWorktree(expectedWorktreePath)).not.toBeNull();
   });
 
   it("returns 409 and keeps tentacle state when worktree deletion fails", async () => {
@@ -2697,7 +2769,7 @@ describe("createApiServer", () => {
     const expectedWorktreePath = join(workspaceCwd, ".octogent", "worktrees", "terminal-1");
     gitClient.setFailRemoveWorktree(true);
 
-    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1?removeWorktree=true`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",

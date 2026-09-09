@@ -128,6 +128,9 @@ export const createWorktreeManager = ({
 
   return {
     getTentacleWorkspaceCwd,
+    // Exposed so callers can resolve a worktree path before the terminal is
+    // registered; getTentacleWorkspaceCwd needs the registry and throws until then.
+    getTentacleWorktreePath,
     createTentacleWorktree,
     hasTentacleWorktree,
     removeTentacleWorktree,

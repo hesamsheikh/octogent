@@ -10,6 +10,9 @@ export type ClaudeUsageSnapshot = {
   secondaryResetAt?: string | null;
   sonnetUsedPercent?: number | null;
   sonnetResetAt?: string | null;
+  scopedUsedPercent?: number | null;
+  scopedResetAt?: string | null;
+  scopedLabel?: string | null;
   extraUsageCostUsed?: number | null;
   extraUsageCostLimit?: number | null;
 };

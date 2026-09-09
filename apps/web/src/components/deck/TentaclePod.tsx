@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { DeckAvailableSkill, DeckTentacleSummary } from "@octogent/core";
+import { useT } from "../../app/providers/LocaleProvider";
 import { OctopusGlyph } from "../EmptyOctopus";
 import type { OctopusVisuals } from "./octopusVisuals";
 
@@ -93,6 +94,7 @@ export const TentaclePod = ({
   isSavingSkills,
   onSaveSuggestedSkills,
 }: TentaclePodProps) => {
+  const t = useT();
   const progressPct =
     tentacle.todoTotal > 0 ? Math.round((tentacle.todoDone / tentacle.todoTotal) * 100) : 0;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -132,11 +134,11 @@ export const TentaclePod = ({
       <header className="deck-pod-header">
         {isFocused && (
           <button type="button" className="deck-pod-btn deck-pod-btn--secondary" onClick={onClose}>
-            ← Back
+            ← {t("common.cancel")}
           </button>
         )}
         <button type="button" className="deck-pod-btn">
-          Spawn
+          {t("web.deck.tentaclePod.spawn")}
         </button>
         <button
           type="button"
@@ -146,10 +148,10 @@ export const TentaclePod = ({
             setIsEditingSkills((current) => !current);
           }}
         >
-          Skills
+          {t("web.deck.tentaclePod.skills")}
         </button>
         <button type="button" className="deck-pod-btn" onClick={() => onVaultBrowse?.()}>
-          Vault
+          {t("web.deck.tentaclePod.vault")}
         </button>
         {confirmingDelete ? (
           <>
@@ -159,14 +161,14 @@ export const TentaclePod = ({
               disabled={isDeleting}
               onClick={() => onDelete?.()}
             >
-              {isDeleting ? "..." : "Confirm Delete"}
+              {isDeleting ? "..." : t("web.deck.tentaclePod.confirmDelete")}
             </button>
             <button
               type="button"
               className="deck-pod-btn deck-pod-btn--secondary"
               onClick={() => setConfirmingDelete(false)}
             >
-              Cancel
+              {t("web.deck.tentaclePod.cancel")}
             </button>
           </>
         ) : (
@@ -174,7 +176,7 @@ export const TentaclePod = ({
             type="button"
             className="deck-pod-btn deck-pod-btn--delete"
             onClick={() => setConfirmingDelete(true)}
-            aria-label="Delete tentacle"
+            aria-label={t("web.a11y.deleteTentacle")}
           >
             <svg className="deck-pod-btn-icon" viewBox="0 0 16 16" aria-hidden="true">
               <path
@@ -192,7 +194,11 @@ export const TentaclePod = ({
 
       <div className="deck-pod-body">
         <span className={`deck-pod-status deck-pod-status--${tentacle.status}`}>
-          {STATUS_LABELS[tentacle.status]}
+          {t(
+            tentacle.status === "needs-review"
+              ? "agentState.review"
+              : `agentState.${tentacle.status}`,
+          )}
         </span>
         <div className="deck-pod-identity">
           <div className="deck-pod-octopus-col">
@@ -217,7 +223,7 @@ export const TentaclePod = ({
           {isEditingSkills && (
             <div className="deck-pod-skills-editor">
               {skillNames.length === 0 ? (
-                <span className="deck-pod-skills-empty">No Claude Code skills found.</span>
+                <span className="deck-pod-skills-empty">{t("web.deck.tentaclePod.noSkills")}</span>
               ) : (
                 <div className="deck-pod-skills-options">
                   {skillNames.map((skillName) => {
@@ -236,7 +242,7 @@ export const TentaclePod = ({
                           )}
                           {!skill && (
                             <span className="deck-pod-skill-desc">
-                              Stored on this tentacle, but not available right now.
+                              {t("web.deck.tentaclePod.skillsStored")}
                             </span>
                           )}
                         </span>
@@ -254,7 +260,7 @@ export const TentaclePod = ({
                     setIsEditingSkills(false);
                   }}
                 >
-                  Cancel
+                  {t("web.deck.tentaclePod.cancel")}
                 </button>
                 <button
                   type="button"
@@ -262,7 +268,9 @@ export const TentaclePod = ({
                   disabled={Boolean(isSavingSkills)}
                   onClick={() => void handleSaveSkills()}
                 >
-                  {isSavingSkills ? "Saving..." : "Save Skills"}
+                  {isSavingSkills
+                    ? t("web.deck.tentaclePod.saving")
+                    : t("web.deck.tentaclePod.saveSkills")}
                 </button>
               </div>
             </div>
@@ -280,7 +288,10 @@ export const TentaclePod = ({
                 className="deck-pod-progress-label"
                 style={{ backgroundColor: `${visuals.color}22`, color: visuals.color }}
               >
-                {tentacle.todoDone}/{tentacle.todoTotal} done
+                {t("web.deck.tentaclePod.progress", {
+                  done: tentacle.todoDone,
+                  total: tentacle.todoTotal,
+                })}
               </span>
             </div>
           )}
@@ -295,7 +306,7 @@ export const TentaclePod = ({
 
           {tentacle.suggestedSkills.length > 0 && (
             <div className="deck-pod-vault">
-              <span className="deck-pod-vault-label">skills</span>
+              <span className="deck-pod-vault-label">{t("web.deck.tentaclePod.skills")}</span>
               <div className="deck-pod-vault-files">
                 {tentacle.suggestedSkills.map((skill) => (
                   <span key={skill} className="deck-pod-vault-file">
@@ -308,7 +319,7 @@ export const TentaclePod = ({
 
           {tentacle.vaultFiles.length > 0 && (
             <div className="deck-pod-vault">
-              <span className="deck-pod-vault-label">vault</span>
+              <span className="deck-pod-vault-label">{t("web.deck.tentaclePod.vault")}</span>
               <div className="deck-pod-vault-files">
                 {tentacle.vaultFiles.map((file) => (
                   <button

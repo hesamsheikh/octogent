@@ -7,6 +7,7 @@ import type {
   TentaclePullRequestSnapshot,
   TentacleWorkspaceMode,
   TerminalAgentProvider,
+  TerminalCompletionSummary,
   TerminalLifecycleState,
 } from "@octogent/core";
 import { isTerminalAgentProvider, isTerminalCompletionSoundId } from "@octogent/core";
@@ -56,7 +57,12 @@ export type Disposable = {
 export type TerminalSession = {
   terminalId: string;
   tentacleId: string;
-  pty: IPty;
+  // Reliability fix: set to null after teardown so the only remaining
+  // reference to the IPty drops and GC can release the underlying master
+  // FD. Without this, accumulated PTY allocations exhaust
+  // `kern.tty.ptmx_max` (default 511 on macOS) within ~10-20 minutes
+  // of normal usage. Reads must guard with `if (!session.isClosed)` first.
+  pty: IPty | null;
   ptyDisposables?: Disposable[];
   clients: Set<WebSocket>;
   directListeners: Set<DirectSessionListener>;
@@ -77,11 +83,16 @@ export type TerminalSession = {
   hasTranscriptEnded?: boolean;
   initialPrompt?: string;
   isInitialPromptSent?: boolean;
+  initialPromptSentAt?: number;
+  hasSessionStartHook?: boolean;
+  isInitialPromptAcknowledged?: boolean;
+  hasRetriedInitialPrompt?: boolean;
   initialInputDraft?: string;
   isInitialInputDraftSent?: boolean;
   keepAliveWithoutClients?: boolean;
   isClosed?: boolean;
   hasSeenProcessing?: boolean;
+  lastOutputActivityAt?: number;
   lastToolName?: string | undefined;
 };
 
@@ -127,18 +138,26 @@ export type PersistedTerminal = {
   createdAt: string;
   workspaceMode: TentacleWorkspaceMode;
   agentProvider?: TerminalAgentProvider;
+  agentModel?: string;
+  agentReasoningEffort?: string;
+  agentEffortTier?: string;
+  /** Model the agent actually reported in its transcript (Claude), when none was requested. */
+  agentModelObserved?: string;
   initialPrompt?: string;
   initialInputDraft?: string;
   lastActiveAt?: string;
   parentTerminalId?: string;
   lifecycleState?: TerminalLifecycleState | undefined;
   lifecycleReason?: string | undefined;
+  completedAt?: string | undefined;
+  completionSummary?: TerminalCompletionSummary | undefined;
   lifecycleUpdatedAt?: string | undefined;
   processId?: number | undefined;
   startedAt?: string | undefined;
   endedAt?: string | undefined;
   exitCode?: number | undefined;
   exitSignal?: number | string | undefined;
+  archivedAt?: string | undefined;
 };
 
 export type GitClientPullRequestSnapshot = Omit<

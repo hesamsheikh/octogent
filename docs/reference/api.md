@@ -11,13 +11,15 @@ Most HTTP routes either read/write persisted files or create runtime records. We
 
 ## Terminals
 
-- `GET /api/terminal-snapshots` - returns the current terminal list and snapshot state for the UI
+- `GET /api/terminal-snapshots` - returns the current terminal list and snapshot state for the UI; archived records are excluded unless `?includeArchived=1` is passed
 - `POST /api/terminals` - creates a new terminal session
 - `POST /api/terminals/prune` - removes terminal records with `stale`, `stopped`, or `exited` lifecycle state
+- `POST /api/terminals/archive-completed` - archives every terminal record with `completed` lifecycle state
 - `PATCH /api/terminals/:terminalId` - updates terminal metadata such as the display name
 - `DELETE /api/terminals/:terminalId` - removes a terminal and closes its active session
 - `POST /api/terminals/:terminalId/stop` - stops an active session or recorded stale process
 - `POST /api/terminals/:terminalId/kill` - kills an active session or recorded stale process
+- `POST /api/terminals/:terminalId/archive` - archives a non-running terminal record (running terminals get `409`); files such as transcripts and completion summaries are kept
 - `WS /api/terminals/:terminalId/ws` - streams live terminal IO over WebSocket
 
 Terminal snapshots include `lifecycleState` when known. Supported lifecycle states are `registered`, `running`, `stopped`, `exited`, and `stale`. Stale terminals are records that were persisted as running but could not be reattached to a live Octogent PTY session after startup.
@@ -32,6 +34,7 @@ Creating a terminal registers metadata first. A PTY starts immediately only when
 - `POST /api/tentacles/:tentacleId/git/sync` - syncs the tentacle worktree with its base branch
 - `GET /api/tentacles/:tentacleId/git/pr` - reads pull request information for the tentacle branch
 - `POST /api/tentacles/:tentacleId/git/pr/merge` - merges the tentacle pull request
+- `POST /api/worktrees/gc` - reclaims the worktree directory and branch of every archived worktree terminal whose work is proven merged (`completed` lifecycle state or a `merged: true` completion summary); pass `?dryRun=1` to list the candidates without removing anything. Returns `dryRun`, `candidates`, `reclaimedWorktreeIds`, and `failedWorktreeIds`. Unmerged work is never reclaimed.
 
 ## Deck and tentacles
 
@@ -80,6 +83,10 @@ Current hook names:
 - `pre-tool-use`
 - `notification`
 - `stop`
+
+## Health
+
+- `GET /api/health` - returns a liveness snapshot for daemon scripts and monitors: `status`, `uptimeMs`, `version`, `eventLoopDelayP95Ms` (p95 event-loop delay in ms, one decimal), `ptySessions`, `terminals` (counts by lifecycle state), and `terminalEventClients`
 
 ## Usage and telemetry
 

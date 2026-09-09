@@ -147,11 +147,11 @@ const mockAppRequests = (
     }
 
     if (url.endsWith("/api/ui-state") && method === "GET") {
-      return jsonResponse({});
+      return jsonResponse({ locale: "en", navSchemaVersion: 2, activePrimaryNav: 2 });
     }
 
     if (url.endsWith("/api/ui-state") && method === "PATCH") {
-      return jsonResponse({});
+      return jsonResponse({ locale: "en", navSchemaVersion: 2, activePrimaryNav: 2 });
     }
 
     return notFoundResponse();
@@ -177,7 +177,7 @@ describe("App workspace setup", () => {
     expect(screen.getByLabelText("Runtime status strip")).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "[1] Agents",
+        name: "[2] Agents",
       }),
     ).toHaveAttribute("aria-current", "page");
   });

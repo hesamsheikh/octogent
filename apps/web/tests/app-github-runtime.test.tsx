@@ -74,7 +74,7 @@ const mockGithubRuntimeRequests = () => {
     }
 
     if (url.endsWith("/api/ui-state") && method === "GET") {
-      return jsonResponse({});
+      return jsonResponse({ locale: "en" });
     }
 
     return notFoundResponse();
@@ -104,9 +104,11 @@ describe("App GitHub runtime views", () => {
     mockGithubRuntimeRequests();
 
     const { container } = render(<App />);
+    // The shell first paints in the product default language and only switches
+    // once the persisted ui state arrives, so wait for the hydrated label.
     fireEvent.click(
-      screen.getByRole("button", {
-        name: "[3] Activity",
+      await screen.findByRole("button", {
+        name: "[4] Activity",
       }),
     );
 
@@ -117,7 +119,7 @@ describe("App GitHub runtime views", () => {
       within(githubView).getByRole("button", { name: "Refresh GitHub overview data" }),
     ).toBeInTheDocument();
     expect(within(githubView).getByText("Recent commits")).toBeInTheDocument();
-    expect(within(githubView).getByText("Showing last 50")).toBeInTheDocument();
+    expect(within(githubView).getByText("Showing last 50 commits")).toBeInTheDocument();
     expect(within(githubView).getByText("recent commit 1")).toBeInTheDocument();
     expect(within(githubView).getByText("recent commit 50")).toBeInTheDocument();
     expect(within(githubView).getAllByRole("listitem")).toHaveLength(50);

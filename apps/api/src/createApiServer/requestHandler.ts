@@ -8,6 +8,7 @@ import type { ClaudeUsageSnapshot } from "../claudeUsage";
 import type { CodeIntelStore } from "../codeIntelStore";
 import type { CodexUsageSnapshot } from "../codexUsage";
 import type { GitHubRepoSummarySnapshot } from "../githubRepoSummary";
+import type { HealthSnapshot } from "../healthSnapshot";
 import { logVerbose } from "../logging";
 import type { MonitorService } from "../monitor";
 import { handleCodeIntelEventsRoute } from "./codeIntelRoutes";
@@ -31,6 +32,7 @@ import {
   handleDeckVaultFileRoute,
 } from "./deckRoutes";
 import { handleTentacleGitPullRequestRoute, handleTentacleGitRoute } from "./gitRoutes";
+import { handleHealthRoute } from "./healthRoutes";
 import {
   handleChannelMessagesRoute,
   handleHookRoute,
@@ -44,6 +46,7 @@ import {
   handleMonitorFeedRoute,
   handleMonitorRefreshRoute,
 } from "./monitorRoutes";
+import { evaluateRemoteAuth } from "./remoteAuth";
 import type {
   ApiRouteHandler,
   RouteHandlerContext,
@@ -59,10 +62,13 @@ import {
 } from "./security";
 import {
   handleTerminalActionRoute,
+  handleTerminalArchiveCompletedRoute,
+  handleTerminalDeletePreviewRoute,
   handleTerminalItemRoute,
   handleTerminalPruneRoute,
   handleTerminalSnapshotsRoute,
   handleTerminalsCollectionRoute,
+  handleWorktreeGcRoute,
 } from "./terminalRoutes";
 import {
   handleClaudeUsageRoute,
@@ -103,7 +109,9 @@ type CreateApiRequestHandlerOptions = {
   monitorService: MonitorService;
   invalidateClaudeUsageCache: () => void;
   codeIntelStore: CodeIntelStore;
-  allowRemoteAccess: boolean;
+  readHealthSnapshot: () => HealthSnapshot;
+  isRemoteBinding: () => boolean;
+  accessToken: string | null;
 };
 
 const API_ROUTE_MAP: ReadonlyMap<string, readonly ApiRouteHandler[]> = new Map([
@@ -127,6 +135,7 @@ const API_ROUTE_MAP: ReadonlyMap<string, readonly ApiRouteHandler[]> = new Map([
     ],
   ],
   ["terminal-snapshots", [handleTerminalSnapshotsRoute]],
+  ["health", [handleHealthRoute]],
   ["codex", [handleCodexUsageRoute]],
   ["claude", [handleClaudeUsageRoute]],
   ["analytics", [handleUsageHeatmapRoute]],
@@ -148,10 +157,13 @@ const API_ROUTE_MAP: ReadonlyMap<string, readonly ApiRouteHandler[]> = new Map([
     [
       handleTerminalsCollectionRoute,
       handleTerminalPruneRoute,
+      handleTerminalArchiveCompletedRoute,
+      handleTerminalDeletePreviewRoute,
       handleTerminalActionRoute,
       handleTerminalItemRoute,
     ],
   ],
+  ["worktrees", [handleWorktreeGcRoute]],
   ["tentacles", [handleTentacleGitRoute, handleTentacleGitPullRequestRoute]],
   ["code-intel", [handleCodeIntelEventsRoute]],
 ]);
@@ -214,7 +226,9 @@ export const createApiRequestHandler = ({
   monitorService,
   invalidateClaudeUsageCache,
   codeIntelStore,
-  allowRemoteAccess,
+  readHealthSnapshot,
+  isRemoteBinding,
+  accessToken,
 }: CreateApiRequestHandlerOptions) => {
   const resolvedWebDistDir = webDistDir && existsSync(webDistDir) ? webDistDir : null;
 
@@ -235,6 +249,7 @@ export const createApiRequestHandler = ({
     monitorService,
     invalidateClaudeUsageCache,
     codeIntelStore,
+    readHealthSnapshot,
   };
 
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -248,18 +263,37 @@ export const createApiRequestHandler = ({
 
     const originHeader = readHeaderValue(request.headers.origin);
     const hostHeader = readHeaderValue(request.headers.host);
-    const corsOrigin = getRequestCorsOrigin(originHeader, allowRemoteAccess);
+    const remoteBinding = isRemoteBinding();
+    const corsOrigin = getRequestCorsOrigin(originHeader, hostHeader, remoteBinding);
 
-    if (!isAllowedHostHeader(hostHeader, allowRemoteAccess)) {
+    if (!isAllowedHostHeader(hostHeader, remoteBinding)) {
       writeJson(response, 403, { error: "Host not allowed." }, null);
       logRequest(request.method ?? "?", request.url ?? "/", 403, startTime);
       return;
     }
 
-    if (!isAllowedOriginHeader(originHeader, allowRemoteAccess)) {
+    if (!isAllowedOriginHeader(originHeader, hostHeader, remoteBinding)) {
       writeJson(response, 403, { error: "Origin not allowed." }, null);
       logRequest(request.method ?? "?", request.url ?? "/", 403, startTime);
       return;
+    }
+
+    const authDecision = evaluateRemoteAuth({
+      remoteAddress: request.socket.remoteAddress,
+      url: request.url ?? "/",
+      headers: {
+        "x-octogent-token": request.headers["x-octogent-token"],
+        cookie: request.headers.cookie,
+      },
+      accessToken,
+    });
+    if (authDecision.kind === "deny") {
+      writeJson(response, 401, { error: "Access token required." }, corsOrigin);
+      logRequest(request.method ?? "?", request.url ?? "/", 401, startTime);
+      return;
+    }
+    if (authDecision.kind === "allow-set-cookie") {
+      response.setHeader("Set-Cookie", authDecision.cookie);
     }
 
     try {

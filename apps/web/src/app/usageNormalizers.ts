@@ -52,6 +52,9 @@ export const normalizeClaudeUsageSnapshot = (value: unknown): ClaudeUsageSnapsho
     secondaryResetAt: asString(record.secondaryResetAt),
     sonnetUsedPercent: asNumber(record.sonnetUsedPercent),
     sonnetResetAt: asString(record.sonnetResetAt),
+    scopedUsedPercent: asNumber(record.scopedUsedPercent),
+    scopedResetAt: asString(record.scopedResetAt),
+    scopedLabel: asString(record.scopedLabel),
     extraUsageCostUsed: asNumber(record.extraUsageCostUsed),
     extraUsageCostLimit: asNumber(record.extraUsageCostLimit),
   };

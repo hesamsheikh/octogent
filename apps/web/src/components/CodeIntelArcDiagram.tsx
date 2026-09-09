@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CouplingData } from "../app/codeIntelAggregation";
 import { heatColor } from "../app/codeIntelAggregation";
+import { useT } from "../app/providers/LocaleProvider";
 
 type CodeIntelArcDiagramProps = {
   data: CouplingData;
@@ -15,6 +16,7 @@ const MAX_ARCS = 40;
 const ACCENT = "#d4a017";
 
 export const CodeIntelArcDiagram = ({ data }: CodeIntelArcDiagramProps) => {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 300, height: 400 });
   const [hoveredPair, setHoveredPair] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export const CodeIntelArcDiagram = ({ data }: CodeIntelArcDiagramProps) => {
         height={Math.max(svgHeight, size.height)}
         viewBox={`0 0 ${size.width} ${Math.max(svgHeight, size.height)}`}
         role="img"
-        aria-label="File coupling arc diagram"
+        aria-label={t("web.a11y.fileCouplingArcDiagram")}
       >
         {/* Arcs — curve to the right */}
         {pairs.map((pair) => {
@@ -224,7 +226,7 @@ export const CodeIntelArcDiagram = ({ data }: CodeIntelArcDiagramProps) => {
               ))}
             </div>
           ) : (
-            <div className="code-intel-tooltip-value">No coupling detected</div>
+            <div className="code-intel-tooltip-value">{t("web.codeIntel.noCoupling")}</div>
           )}
         </div>
       )}

@@ -32,6 +32,8 @@ Delivered messages are written into the terminal input as lines like:
 
 If the target terminal is not running, the message waits in memory until that session exists and becomes idle. If the API restarts first, the message is lost.
 
+`octogent channel send` reports which of the two happened: "delivered" when the message was injected immediately, "queued" when the agent was busy and it will be delivered at the end of the current turn.
+
 ## CLI usage
 
 Send a message:

@@ -4,6 +4,11 @@ import {
   type TerminalNameOrigin,
   isTerminalAgentProvider,
 } from "../terminalRuntime";
+import {
+  type EffortTier,
+  isEffortTier,
+  isValidModelToken,
+} from "../terminalRuntime/modelSelection";
 
 const isTerminalNameOrigin = (value: unknown): value is TerminalNameOrigin =>
   value === "generated" || value === "user" || value === "prompt";
@@ -128,6 +133,42 @@ export const parseTerminalAgentProvider = (payload: unknown) => {
     agentProvider: rawAgentProvider,
     error: null as string | null,
   };
+};
+
+export const parseTerminalModelSelection = (payload: unknown) => {
+  const empty = {
+    agentModel: undefined as string | undefined,
+    agentEffort: undefined as EffortTier | undefined,
+    error: null as string | null,
+  };
+  if (payload === null || payload === undefined || typeof payload !== "object") {
+    return empty;
+  }
+  const record = payload as Record<string, unknown>;
+
+  let agentModel: string | undefined;
+  if (record.agentModel !== undefined) {
+    if (!isValidModelToken(record.agentModel)) {
+      return {
+        ...empty,
+        error: "agentModel must be a plain model identifier (letters, digits, . _ -).",
+      };
+    }
+    agentModel = record.agentModel;
+  }
+
+  let agentEffort: EffortTier | undefined;
+  if (record.agentEffort !== undefined) {
+    if (!isEffortTier(record.agentEffort)) {
+      return {
+        ...empty,
+        error: "agentEffort must be one of: light, standard, heavy, max.",
+      };
+    }
+    agentEffort = record.agentEffort;
+  }
+
+  return { agentModel, agentEffort, error: null as string | null };
 };
 
 export const parseTerminalNameOrigin = (payload: unknown) => {

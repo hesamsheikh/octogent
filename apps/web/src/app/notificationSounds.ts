@@ -6,38 +6,38 @@ export const DEFAULT_TERMINAL_COMPLETION_SOUND: TerminalCompletionSoundId = "pop
 
 export const TERMINAL_COMPLETION_SOUND_OPTIONS: Array<{
   id: TerminalCompletionSoundId;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }> = [
   {
     id: "soft-chime",
-    label: "Soft chime",
-    description: "Subtle short chime.",
+    labelKey: "web.sound.softChime",
+    descriptionKey: "web.sound.softChimeDesc",
   },
   {
     id: "retro-beep",
-    label: "Retro beep",
-    description: "Classic terminal-style beep.",
+    labelKey: "web.sound.retroBeep",
+    descriptionKey: "web.sound.retroBeepDesc",
   },
   {
     id: "double-beep",
-    label: "Double beep",
-    description: "Two quick confirmation beeps.",
+    labelKey: "web.sound.doubleBeep",
+    descriptionKey: "web.sound.doubleBeepDesc",
   },
   {
     id: "bell",
-    label: "Bell",
-    description: "Bright bell-like ding.",
+    labelKey: "web.sound.bell",
+    descriptionKey: "web.sound.bellDesc",
   },
   {
     id: "pop",
-    label: "Pop",
-    description: "Very short soft pop.",
+    labelKey: "web.sound.pop",
+    descriptionKey: "web.sound.popDesc",
   },
   {
     id: "silent",
-    label: "Silent",
-    description: "No completion sound.",
+    labelKey: "web.sound.silent",
+    descriptionKey: "web.sound.silentDesc",
   },
 ];
 

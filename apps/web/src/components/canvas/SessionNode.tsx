@@ -50,7 +50,12 @@ export const SessionNode = ({ node, isSelected, onPointerDown, onClick }: Sessio
     node.agentRuntimeState === "waiting_for_permission" ||
     node.agentRuntimeState === "waiting_for_user";
   const isLifecycleAttention =
-    node.agentState === "stale" || node.agentState === "exited" || node.agentState === "stopped";
+    node.agentState === "stale" ||
+    node.agentState === "stalled" ||
+    node.agentState === "exited" ||
+    node.agentState === "stopped" ||
+    node.agentState === "awaiting-review";
+  const isCompleted = node.agentState === "completed";
   const color = isActive ? node.color : "#9ca3af";
   const isWorktree = node.workspaceMode === "worktree" && !node.parentTerminalId;
   const isSwarmWorker = !!node.parentTerminalId;
@@ -66,18 +71,27 @@ export const SessionNode = ({ node, isSelected, onPointerDown, onClick }: Sessio
     if (node.agentState === "stale") {
       return "STALE";
     }
+    if (node.agentState === "stalled") {
+      return "STALLED";
+    }
     if (node.agentState === "exited") {
       return "EXITED";
     }
     if (node.agentState === "stopped") {
       return "STOPPED";
     }
+    if (node.agentState === "awaiting-review") {
+      return "REVIEW";
+    }
+    if (node.agentState === "completed") {
+      return "DONE";
+    }
     return "";
   }, [node.agentRuntimeState, node.agentState, node.waitingToolName]);
 
   const pillWidth = pillLabel.length * PILL_CHAR_WIDTH + PILL_PADDING;
   const pillY = node.radius + 4;
-  const labelYOffset = isWaiting || isLifecycleAttention ? PILL_HEIGHT + 6 : 0;
+  const labelYOffset = isWaiting || isLifecycleAttention || isCompleted ? PILL_HEIGHT + 6 : 0;
 
   return (
     <g
@@ -101,6 +115,20 @@ export const SessionNode = ({ node, isSelected, onPointerDown, onClick }: Sessio
       }}
       style={{ cursor: "pointer" }}
     >
+      {node.completionSummary && (
+        <title>
+          {[
+            node.completionSummary.taskLine,
+            `${node.completionSummary.commits.length} commit${node.completionSummary.commits.length === 1 ? "" : "s"} · +${node.completionSummary.insertions}/-${node.completionSummary.deletions}`,
+            node.completionSummary.branch
+              ? `${node.completionSummary.branch}${node.completionSummary.merged ? " ✓merged" : ""}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+        </title>
+      )}
+
       {/* Worktree ring — dashed stroke */}
       {isWorktree && (
         <circle
@@ -150,13 +178,15 @@ export const SessionNode = ({ node, isSelected, onPointerDown, onClick }: Sessio
       <circle
         className="canvas-node-core"
         r={node.radius}
-        fill={isWaiting || isLifecycleAttention ? "#f59e0b" : color}
-        opacity={isActive ? 1 : 0.4}
+        fill={isWaiting || isLifecycleAttention ? "#f59e0b" : isCompleted ? "#22c55e" : color}
+        opacity={isCompleted ? 0.55 : isActive ? 1 : 0.4}
       />
 
       {/* State indicator pill */}
-      {(isWaiting || isLifecycleAttention) && (
-        <g className="canvas-node-waiting-indicator">
+      {(isWaiting || isLifecycleAttention || isCompleted) && (
+        <g
+          className={`canvas-node-waiting-indicator${isCompleted ? " canvas-node-waiting-indicator--done" : ""}`}
+        >
           <rect
             className="canvas-node-waiting-pill"
             x={-pillWidth / 2}

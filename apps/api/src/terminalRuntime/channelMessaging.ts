@@ -1,4 +1,5 @@
 import { logVerbose } from "../logging";
+import { AGENT_INJECT_SUBMIT_DELAY_MS, AGENT_PASTE_END, AGENT_PASTE_START } from "./constants";
 import type { ChannelMessage, PersistedTerminal, TerminalSession } from "./types";
 
 export const createChannelMessaging = (deps: {
@@ -17,7 +18,14 @@ export const createChannelMessaging = (deps: {
     }
 
     const session = sessions.get(terminalId);
-    if (!session) {
+    if (!session || session.agentState !== "idle") {
+      return 0;
+    }
+
+    // An idle session is not enough: after the agent exits, the shell behind
+    // the PTY is still "idle", and text injected there vanishes into bash.
+    // A message stays queued until a session with a live transcript exists.
+    if (session.hasTranscriptEnded) {
       return 0;
     }
 
@@ -26,11 +34,18 @@ export const createChannelMessaging = (deps: {
       return 0;
     }
 
-    // Compose all pending messages into a single prompt injection.
+    // Compose all pending messages into a single prompt injection. The paste
+    // and the submitting Enter are written separately: combined in one write,
+    // the TUI can treat the trailing return as part of the paste and leave the
+    // whole message sitting unsent in the input box.
     const lines = undelivered.map(
       (m) => `[Channel message from ${m.fromTerminalId}]: ${m.content}`,
     );
-    const prompt = `${lines.join("\n")}\r`;
+    const paste = `${AGENT_PASTE_START}${lines.join("\n")}${AGENT_PASTE_END}`;
+
+    if (!writeInput(terminalId, paste)) {
+      return 0;
+    }
 
     logVerbose(`[Channel] Delivering ${undelivered.length} message(s) to ${terminalId}`);
 
@@ -38,7 +53,9 @@ export const createChannelMessaging = (deps: {
       m.delivered = true;
     }
 
-    writeInput(terminalId, prompt);
+    setTimeout(() => {
+      writeInput(terminalId, "\r");
+    }, AGENT_INJECT_SUBMIT_DELAY_MS);
     return undelivered.length;
   };
 
@@ -70,11 +87,9 @@ export const createChannelMessaging = (deps: {
         `[Channel] Queued message ${message.messageId} from=${fromTerminalId} to=${toTerminalId}`,
       );
 
-      // If the target session is idle, deliver immediately.
-      const targetSession = sessions.get(toTerminalId);
-      if (targetSession && targetSession.agentState === "idle") {
-        deliverChannelMessages(toTerminalId);
-      }
+      // Attempt immediate delivery; deliverChannelMessages holds the guards
+      // (idle, live transcript), so a refused attempt just leaves it queued.
+      deliverChannelMessages(toTerminalId);
 
       return message;
     },

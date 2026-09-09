@@ -1,6 +1,8 @@
-export const formatTimestamp = (value: string | null) => {
+import { t } from "@octogent/core";
+
+export const formatTimestamp = (value: string | null, locale?: string) => {
   if (!value) {
-    return "--";
+    return locale ? t(locale, "format.null") : "--";
   }
 
   const parsed = Date.parse(value);
@@ -8,7 +10,7 @@ export const formatTimestamp = (value: string | null) => {
     return value;
   }
 
-  return new Date(parsed).toLocaleString("en-US", {
+  return new Date(parsed).toLocaleString(locale ?? "en-US", {
     month: "short",
     day: "2-digit",
     hour: "2-digit",

@@ -7,6 +7,7 @@ import {
   type TerminalAgentProvider,
   type TerminalNameOrigin,
 } from "../terminalRuntime";
+import type { EffortTier } from "../terminalRuntime/modelSelection";
 import type { ApiRouteHandler } from "./routeHelpers";
 import {
   readJsonBodyOrWriteError,
@@ -16,6 +17,7 @@ import {
 } from "./routeHelpers";
 import {
   parseTerminalAgentProvider,
+  parseTerminalModelSelection,
   parseTerminalName,
   parseTerminalNameOrigin,
   parseTerminalWorkspaceMode,
@@ -55,7 +57,8 @@ export const handleTerminalSnapshotsRoute: ApiRouteHandler = async (
     return true;
   }
 
-  const payload = runtime.listTerminalSnapshots();
+  const includeArchived = requestUrl.searchParams.get("includeArchived") === "1";
+  const payload = runtime.listTerminalSnapshots({ includeArchived });
   writeJson(response, 200, payload, corsOrigin);
   return true;
 };
@@ -102,6 +105,12 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
     return true;
   }
 
+  const modelSelectionResult = parseTerminalModelSelection(bodyReadResult.payload);
+  if (modelSelectionResult.error) {
+    writeJson(response, 400, { error: modelSelectionResult.error }, corsOrigin);
+    return true;
+  }
+
   try {
     const createTerminalInput: {
       terminalId?: string;
@@ -110,6 +119,8 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
       tentacleName?: string;
       workspaceMode: TentacleWorkspaceMode;
       agentProvider?: TerminalAgentProvider;
+      agentModel?: string;
+      agentEffort?: EffortTier;
       nameOrigin?: TerminalNameOrigin;
       initialPrompt?: string;
       initialInputDraft?: string;
@@ -123,6 +134,12 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
     }
     if (agentProviderResult.agentProvider !== undefined) {
       createTerminalInput.agentProvider = agentProviderResult.agentProvider;
+    }
+    if (modelSelectionResult.agentModel !== undefined) {
+      createTerminalInput.agentModel = modelSelectionResult.agentModel;
+    }
+    if (modelSelectionResult.agentEffort !== undefined) {
+      createTerminalInput.agentEffort = modelSelectionResult.agentEffort;
     }
     if (nameOriginResult.nameOrigin !== undefined) {
       createTerminalInput.nameOrigin = nameOriginResult.nameOrigin;
@@ -258,7 +275,7 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
 };
 
 const TERMINAL_ITEM_PATH_PATTERN = /^\/api\/terminals\/([^/]+)$/;
-const TERMINAL_ACTION_PATH_PATTERN = /^\/api\/terminals\/([^/]+)\/(stop|kill)$/;
+const TERMINAL_ACTION_PATH_PATTERN = /^\/api\/terminals\/([^/]+)\/(stop|kill|archive)$/;
 
 export const handleTerminalItemRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
@@ -277,7 +294,11 @@ export const handleTerminalItemRoute: ApiRouteHandler = async (
   const terminalId = decodeURIComponent(renameMatch[1] ?? "");
   if (request.method === "DELETE") {
     try {
-      runtime.deleteTerminal(terminalId);
+      // The worktree directory survives a plain delete (record only); pass
+      // ?removeWorktree=true to reclaim it, which the caller does only after
+      // confirming any unmerged work is expendable.
+      const removeWorktree = requestUrl.searchParams.get("removeWorktree") === "true";
+      runtime.deleteTerminal(terminalId, { removeWorktree });
       writeNoContent(response, 204, corsOrigin);
       return true;
     } catch (error) {
@@ -315,6 +336,30 @@ export const handleTerminalItemRoute: ApiRouteHandler = async (
   return true;
 };
 
+const TERMINAL_DELETE_PREVIEW_PATTERN = /^\/api\/terminals\/([^/]+)\/delete-preview$/;
+
+export const handleTerminalDeletePreviewRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  const match = requestUrl.pathname.match(TERMINAL_DELETE_PREVIEW_PATTERN);
+  if (!match) {
+    return false;
+  }
+  if (request.method !== "GET") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+  const terminalId = decodeURIComponent(match[1] ?? "");
+  const preview = runtime.previewTerminalDeletion(terminalId);
+  if (!preview.exists) {
+    writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
+    return true;
+  }
+  writeJson(response, 200, preview, corsOrigin);
+  return true;
+};
+
 export const handleTerminalActionRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
   { runtime },
@@ -331,15 +376,27 @@ export const handleTerminalActionRoute: ApiRouteHandler = async (
 
   const terminalId = decodeURIComponent(actionMatch[1] ?? "");
   const action = actionMatch[2];
-  const snapshot =
-    action === "kill" ? runtime.killTerminal(terminalId) : runtime.stopTerminal(terminalId);
-  if (!snapshot) {
-    writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
-    return true;
-  }
+  try {
+    const snapshot =
+      action === "archive"
+        ? runtime.archiveTerminal(terminalId)
+        : action === "kill"
+          ? runtime.killTerminal(terminalId)
+          : runtime.stopTerminal(terminalId);
+    if (!snapshot) {
+      writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
+      return true;
+    }
 
-  writeJson(response, 200, snapshot, corsOrigin);
-  return true;
+    writeJson(response, 200, snapshot, corsOrigin);
+    return true;
+  } catch (error) {
+    if (error instanceof RuntimeInputError) {
+      writeJson(response, 409, { error: error.message }, corsOrigin);
+      return true;
+    }
+    throw error;
+  }
 };
 
 export const handleTerminalPruneRoute: ApiRouteHandler = async (
@@ -356,5 +413,45 @@ export const handleTerminalPruneRoute: ApiRouteHandler = async (
   }
 
   writeJson(response, 200, { prunedTerminalIds: runtime.pruneTerminals() }, corsOrigin);
+  return true;
+};
+
+export const handleWorktreeGcRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  if (requestUrl.pathname !== "/api/worktrees/gc") {
+    return false;
+  }
+
+  if (request.method !== "POST") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+
+  const dryRun = requestUrl.searchParams.get("dryRun") === "1";
+  writeJson(response, 200, runtime.gcWorktrees({ dryRun }), corsOrigin);
+  return true;
+};
+
+export const handleTerminalArchiveCompletedRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  if (requestUrl.pathname !== "/api/terminals/archive-completed") {
+    return false;
+  }
+
+  if (request.method !== "POST") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+
+  writeJson(
+    response,
+    200,
+    { archivedTerminalIds: runtime.archiveCompletedTerminals() },
+    corsOrigin,
+  );
   return true;
 };

@@ -1,13 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AddTentacleForm } from "../src/components/deck/AddTentacleForm";
+import { renderWithLocale } from "./test-utils/renderWithLocale";
 
 describe("AddTentacleForm", () => {
   it("submits selected suggested skills", () => {
     const onSubmit = vi.fn();
 
-    render(
+    renderWithLocale(
       <AddTentacleForm
         onSubmit={onSubmit}
         onCancel={() => {}}

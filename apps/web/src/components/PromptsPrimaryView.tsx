@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { usePromptLibrary } from "../app/hooks/usePromptLibrary";
+import { useT } from "../app/providers/LocaleProvider";
 import { SidebarPromptsList } from "./SidebarPromptsList";
 import { Terminal } from "./Terminal";
 import { ActionButton } from "./ui/ActionButton";
@@ -16,6 +17,7 @@ type NewPromptMode = {
 } | null;
 
 export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimaryViewProps) => {
+  const t = useT();
   const {
     prompts,
     selectedPromptName,
@@ -145,7 +147,7 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
   const showPromptDetail = !showTerminal || !newPromptMode;
 
   return (
-    <section className="prompts-view" aria-label="Prompts primary view">
+    <section className="prompts-view" aria-label={t("web.a11y.promptsView")}>
       {/* Terminal — kept mounted when active, hidden via CSS when viewing a prompt */}
       {newPromptMode && (
         <div
@@ -155,15 +157,15 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
         >
           <header className="prompts-terminal-header">
             <button type="button" className="prompts-terminal-back" onClick={handleBackToLibrary}>
-              ← Back
+              {t("web.prompts.back")}
             </button>
             <span className="prompts-terminal-label">
-              <strong>Prompt Engineer</strong>
+              <strong>{t("web.prompts.engineer")}</strong>
             </span>
           </header>
           <Terminal
             terminalId={newPromptMode.terminalId}
-            terminalLabel="Prompt Engineer"
+            terminalLabel={t("web.prompts.engineer")}
             hidePromptPicker
           />
         </div>
@@ -175,14 +177,16 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
           {errorMessage ? <p className="prompts-error">{errorMessage}</p> : null}
 
           {isLoadingDetail ? (
-            <p className="prompts-empty">Loading prompt...</p>
+            <p className="prompts-empty">{t("web.prompts.loading")}</p>
           ) : selectedPrompt ? (
             <div className="prompts-detail">
               <header className="prompts-detail-header">
                 <div className="prompts-detail-header-left">
                   <h3 className="prompts-detail-name">{selectedPrompt.name}</h3>
                   <span className="prompts-detail-source-badge" data-source={selectedPrompt.source}>
-                    {selectedPrompt.source === "user" ? "User" : "Built-in"}
+                    {selectedPrompt.source === "user"
+                      ? t("web.prompts.source.user")
+                      : t("web.prompts.source.builtin")}
                   </span>
                 </div>
                 {selectedPrompt.source === "user" && (
@@ -194,19 +198,21 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
                             void onSubmitEdit();
                           }}
                         >
-                          Save
+                          {t("common.save")}
                         </ActionButton>
-                        <ActionButton onClick={onCancelEditing}>Cancel</ActionButton>
+                        <ActionButton onClick={onCancelEditing}>{t("common.cancel")}</ActionButton>
                       </>
                     ) : (
                       <>
-                        <ActionButton onClick={onStartEditing}>Edit</ActionButton>
+                        <ActionButton onClick={onStartEditing}>
+                          {t("web.prompts.edit")}
+                        </ActionButton>
                         <ActionButton
                           onClick={() => {
                             void onDelete();
                           }}
                         >
-                          Delete
+                          {t("common.delete")}
                         </ActionButton>
                       </>
                     )}
@@ -231,9 +237,7 @@ export const PromptsPrimaryView = ({ enabled, onSidebarContent }: PromptsPrimary
             </div>
           ) : (
             <div className="prompts-empty-state">
-              <p className="prompts-empty">
-                Select a prompt from the sidebar, or create a new one.
-              </p>
+              <p className="prompts-empty">{t("web.prompts.empty")}</p>
             </div>
           )}
         </>

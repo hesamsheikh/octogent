@@ -59,6 +59,7 @@ const normalizeConversationTranscriptEvent = (
       type !== "input_submit" &&
       type !== "output_chunk" &&
       type !== "state_change" &&
+      type !== "tool_use" &&
       type !== "session_end")
   ) {
     return null;

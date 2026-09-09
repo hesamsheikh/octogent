@@ -1,5 +1,10 @@
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { DEFAULT_LOCALE, type Locale, t } from "@octogent/core";
 import { createApiServer } from "./createApiServer";
+import { resolveAccessToken } from "./createApiServer/remoteAuth";
+import { resolveListenHost } from "./listenHost";
 
 const parsePort = (value: string | undefined, fallback: number) => {
   if (!value) {
@@ -13,68 +18,67 @@ const parsePort = (value: string | undefined, fallback: number) => {
   return parsed;
 };
 
-const host = process.env.HOST ?? "127.0.0.1";
-const port = parsePort(process.env.OCTOGENT_API_PORT ?? process.env.PORT, 8787);
-const allowRemoteAccess = process.env.OCTOGENT_ALLOW_REMOTE_ACCESS === "1";
-const workspaceCwd = process.env.OCTOGENT_WORKSPACE_CWD ?? process.cwd();
-const projectStateDir = process.env.OCTOGENT_PROJECT_STATE_DIR;
-const promptsDir = process.env.OCTOGENT_PROMPTS_DIR;
-const webDistDir = process.env.OCTOGENT_WEB_DIST_DIR;
-
-// Validate startup environment
-const validateStartupEnv = () => {
-  const rawPort = process.env.OCTOGENT_API_PORT ?? process.env.PORT;
+const validateStartupEnv = (env: NodeJS.ProcessEnv, locale: Locale) => {
+  const rawPort = env.OCTOGENT_API_PORT ?? env.PORT;
   if (rawPort !== undefined) {
     const parsed = Number.parseInt(rawPort, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
-      console.error(`Invalid port "${rawPort}": must be an integer between 1 and 65535.`);
-      process.exit(1);
+      throw new Error(t(locale, "startup.invalidPort", { port: rawPort }));
     }
   }
 
-  if (process.env.OCTOGENT_WORKSPACE_CWD && !existsSync(process.env.OCTOGENT_WORKSPACE_CWD)) {
-    console.error(
-      `OCTOGENT_WORKSPACE_CWD directory does not exist: ${process.env.OCTOGENT_WORKSPACE_CWD}`,
-    );
-    process.exit(1);
+  if (env.OCTOGENT_WORKSPACE_CWD && !existsSync(env.OCTOGENT_WORKSPACE_CWD)) {
+    throw new Error(t(locale, "startup.workspaceCwdMissing", { dir: env.OCTOGENT_WORKSPACE_CWD }));
   }
 
-  if (process.env.OCTOGENT_WEB_DIST_DIR && !existsSync(process.env.OCTOGENT_WEB_DIST_DIR)) {
-    console.warn(
-      `OCTOGENT_WEB_DIST_DIR directory does not exist: ${process.env.OCTOGENT_WEB_DIST_DIR} — web UI will be unavailable.`,
-    );
+  if (env.OCTOGENT_WEB_DIST_DIR && !existsSync(env.OCTOGENT_WEB_DIST_DIR)) {
+    console.warn(t(locale, "startup.webDistMissing", { dir: env.OCTOGENT_WEB_DIST_DIR }));
   }
 };
 
-validateStartupEnv();
+export const startApiServerFromEnv = async (env: NodeJS.ProcessEnv = process.env) => {
+  const locale: Locale = (env.OCTOGENT_LOCALE as Locale) ?? DEFAULT_LOCALE;
+  validateStartupEnv(env, locale);
 
-const apiServer = createApiServer({
-  workspaceCwd,
-  projectStateDir,
-  promptsDir,
-  webDistDir,
-  allowRemoteAccess,
-});
+  const host = resolveListenHost(env);
+  const port = parsePort(env.OCTOGENT_API_PORT ?? env.PORT, 8787);
+  const apiServer = createApiServer({
+    workspaceCwd: env.OCTOGENT_WORKSPACE_CWD ?? process.cwd(),
+    projectStateDir: env.OCTOGENT_PROJECT_STATE_DIR,
+    promptsDir: env.OCTOGENT_PROMPTS_DIR,
+    webDistDir: env.OCTOGENT_WEB_DIST_DIR,
+    accessToken: resolveAccessToken(env),
+  });
 
-const shutdown = async () => {
-  await apiServer.stop();
-  process.exit(0);
+  let activePort: number;
+  try {
+    ({ port: activePort } = await apiServer.start(port, host));
+  } catch (error) {
+    await apiServer.stop();
+    throw error;
+  }
+
+  const shutdown = async () => {
+    await apiServer.stop();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown();
+  });
+
+  process.on("SIGTERM", () => {
+    void shutdown();
+  });
+
+  console.log(t(locale, "startup.apiListening", { host, port: String(activePort) }));
+  return apiServer;
 };
 
-process.on("SIGINT", () => {
-  void shutdown();
-});
-
-process.on("SIGTERM", () => {
-  void shutdown();
-});
-
-apiServer
-  .start(port, host)
-  .then(({ port: activePort }) => {
-    console.log(`Octogent API listening on http://${host}:${activePort}`);
-  })
-  .catch((error: unknown) => {
-    console.error(error);
+const entryPath = process.argv[1];
+if (entryPath && resolve(entryPath) === fileURLToPath(import.meta.url)) {
+  startApiServerFromEnv().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   });
+}

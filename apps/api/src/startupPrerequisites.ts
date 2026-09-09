@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { DEFAULT_LOCALE, type Locale, t } from "@octogent/core";
 
 export type StartupPrerequisiteSeverity = "error" | "warning";
 
@@ -125,21 +126,24 @@ export const collectStartupPrerequisiteReport = (
   return { availability, errors, warnings };
 };
 
-export const formatStartupPrerequisiteReport = (report: StartupPrerequisiteReport): string[] => {
+export const formatStartupPrerequisiteReport = (
+  report: StartupPrerequisiteReport,
+  locale: Locale = DEFAULT_LOCALE,
+): string[] => {
   if (report.errors.length === 0 && report.warnings.length === 0) {
     return [];
   }
 
-  const lines = ["Octogent startup preflight:"];
+  const lines = [t(locale, "startup.preflight")];
 
   for (const issue of report.errors) {
-    lines.push(`  Error: ${issue.summary}`);
-    lines.push(`    ${issue.guidance}`);
+    lines.push(t(locale, "startup.preflightError", { message: issue.summary }));
+    lines.push(t(locale, "startup.preflightGuidance", { guidance: issue.guidance }));
   }
 
   for (const issue of report.warnings) {
-    lines.push(`  Warning: ${issue.summary}`);
-    lines.push(`    ${issue.guidance}`);
+    lines.push(t(locale, "startup.preflightWarning", { message: issue.summary }));
+    lines.push(t(locale, "startup.preflightGuidance", { guidance: issue.guidance }));
   }
 
   return lines;

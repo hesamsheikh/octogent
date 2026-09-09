@@ -1,13 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TentaclePod } from "../src/components/deck/TentaclePod";
+import { renderWithLocale } from "./test-utils/renderWithLocale";
 
 describe("TentaclePod skill editor", () => {
   it("saves suggested skills from the deck pod", async () => {
     const onSaveSuggestedSkills = vi.fn().mockResolvedValue(true);
 
-    render(
+    renderWithLocale(
       <TentaclePod
         tentacle={{
           tentacleId: "docs",

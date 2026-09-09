@@ -27,14 +27,16 @@ const isAgentState = (value: unknown): value is AgentState =>
   value === "blocked" ||
   value === "stopped" ||
   value === "exited" ||
-  value === "stale";
+  value === "stale" ||
+  value === "stalled";
 
 const isLifecycleState = (value: unknown) =>
   value === "registered" ||
   value === "running" ||
   value === "stopped" ||
   value === "exited" ||
-  value === "stale";
+  value === "stale" ||
+  value === "stalled";
 
 const isTerminalSnapshot = (value: unknown): value is TerminalSnapshot => {
   if (typeof value !== "object" || value === null) {

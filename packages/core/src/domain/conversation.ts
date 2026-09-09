@@ -11,7 +11,13 @@ export type ConversationTranscriptEvent = {
   sessionId: string;
   tentacleId: string;
   timestamp: string;
-  type: "session_start" | "input_submit" | "output_chunk" | "state_change" | "session_end";
+  type:
+    | "session_start"
+    | "input_submit"
+    | "output_chunk"
+    | "state_change"
+    | "tool_use"
+    | "session_end";
 };
 
 export type ConversationSessionSummary = {
