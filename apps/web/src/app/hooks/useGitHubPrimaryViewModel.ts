@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import type { Locale } from "@octogent/core";
 import {
   GITHUB_OVERVIEW_GRAPH_HEIGHT,
   GITHUB_OVERVIEW_GRAPH_WIDTH,
@@ -25,6 +26,7 @@ type UseGitHubPrimaryViewModelOptions = {
   githubRepoSummary: GitHubRepoSummarySnapshot | null;
   hoveredGitHubOverviewPointIndex: number | null;
   setHoveredGitHubOverviewPointIndex: Dispatch<SetStateAction<number | null>>;
+  locale?: Locale;
 };
 
 type GitHubPrimaryViewModel = {
@@ -45,6 +47,7 @@ export const useGitHubPrimaryViewModel = ({
   githubRepoSummary,
   hoveredGitHubOverviewPointIndex,
   setHoveredGitHubOverviewPointIndex,
+  locale = "en",
 }: UseGitHubPrimaryViewModelOptions): GitHubPrimaryViewModel => {
   const githubCommitSeries = useMemo(
     () => buildGitHubCommitSeries(githubRepoSummary),
@@ -88,14 +91,14 @@ export const useGitHubPrimaryViewModel = ({
   }, [githubOverviewGraphSeries, hoveredGitHubOverviewPointIndex]);
   const githubOverviewHoverLabel = useMemo(() => {
     if (hoveredGitHubOverviewPoint) {
-      return formatGitHubCommitHoverLabel(hoveredGitHubOverviewPoint);
+      return formatGitHubCommitHoverLabel(hoveredGitHubOverviewPoint, locale);
     }
 
     return "Hover points for date and commit count";
-  }, [hoveredGitHubOverviewPoint]);
+  }, [hoveredGitHubOverviewPoint, locale]);
   const githubStatusPill = useMemo(
-    () => buildGitHubStatusPill(githubRepoSummary),
-    [githubRepoSummary],
+    () => buildGitHubStatusPill(githubRepoSummary, locale),
+    [githubRepoSummary, locale],
   );
 
   useEffect(() => {

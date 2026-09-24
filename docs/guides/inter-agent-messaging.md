@@ -21,7 +21,7 @@ When a message is sent, Octogent:
 
 1. verifies the target terminal record exists
 2. appends the message to that terminal's in-memory queue
-3. marks it as undelivered
+3. marks it as pending
 4. injects pending messages into the target PTY when the target session is idle
 
 Delivered messages are written into the terminal input as lines like:
@@ -31,6 +31,30 @@ Delivered messages are written into the terminal input as lines like:
 ```
 
 If the target terminal is not running, the message waits in memory until that session exists and becomes idle. If the API restarts first, the message is lost.
+
+`octogent channel send` reports which of the two happened: "delivered" when the message was injected immediately, "queued" when the agent was busy and it will be delivered at the end of the current turn. It then points to `octogent channel list <terminal-id>`, which shows whether the agent confirmed the message.
+
+### Delivered is not received
+
+Writing into the terminal does not prove the agent got the message: a dialog in the agent's TUI (a usage-limit prompt, say) can take the paste and the Enter that submits it. So Octogent waits for the agent's own receipt:
+
+1. A delivered batch (all messages injected together) is **unconfirmed** until the target's next `UserPromptSubmit` hook. That hook marks every message of the batch **confirmed**.
+2. If the session has already shown working hooks (any Octogent hook has arrived from it) and no confirmation comes within 10 seconds, Octogent pastes the same batch once more and presses Enter again. The retry waits for the agent to be idle, like the first delivery.
+3. If the second attempt is not confirmed within 10 seconds either, the messages are marked **failed: not acknowledged** and the server log records it. A `running` terminal also gets the reason `channel message not acknowledged` until the agent accepts a prompt again.
+
+Two rules keep the receipt honest:
+
+- A session that has never sent a hook is not retried. Without hooks nothing is ever confirmed, and a retry would hand the agent the same message twice. Its messages stay "delivered (awaiting receipt)".
+- One submit confirms one injection. While a terminal's initial prompt is still unconfirmed, the next submit belongs to it, not to a channel batch. While a batch waits for its receipt, later messages to that terminal stay pending, because a submit cannot say which of two batches it confirms.
+
+`octogent channel list <terminal-id>` shows each message's state:
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | queued; not written into the terminal yet |
+| `delivered (awaiting receipt)` | written into the terminal; the agent has not confirmed it (or cannot, without hooks) |
+| `confirmed` | the agent's next prompt submit arrived after delivery |
+| `failed: not acknowledged` | written twice, confirmed neither time |
 
 ## CLI usage
 
@@ -59,12 +83,15 @@ octogent channel list <terminal-id>
 - `POST /api/channels/:terminalId/messages`
 - `GET /api/channels/:terminalId/messages`
 
+Each message carries `delivered` (written into the terminal) and, once that happens, `deliveredAt` and `deliveryAttempts`. A confirmed message adds `acknowledgedAt`; a failed one adds `failed` with the reason. All times are ISO strings.
+
 ## Current behavior
 
 - messages are stored in memory
 - messages do not persist across API restarts
 - delivery state is tracked by the API
 - idle and stop hook events can trigger delivery
+- confirmation comes from the target agent's prompt-submit hook, not from the write itself
 - listing messages shows queued and delivered messages for the current API process
 
 ## Practical rule

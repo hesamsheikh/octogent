@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
+
 import type { PromptLibraryEntry } from "../app/types";
 
 type SidebarPromptsListProps = {
@@ -25,6 +27,7 @@ export const SidebarPromptsList = ({
   onRestoreTerminal,
   onCloseTerminal,
 }: SidebarPromptsListProps) => {
+  const t = useT();
   const userPrompts = useMemo(() => prompts.filter((p) => p.source === "user"), [prompts]);
   const builtinPrompts = useMemo(() => prompts.filter((p) => p.source === "builtin"), [prompts]);
 
@@ -32,28 +35,28 @@ export const SidebarPromptsList = ({
     <div className="sidebar-prompts">
       <div className="sidebar-prompts-toolbar">
         <button type="button" className="sidebar-prompts-new-btn" onClick={onNewPrompt}>
-          + New Prompt
+          {t("web.prompts.new")}
         </button>
         <button
           type="button"
           className="sidebar-prompts-refresh-btn"
           onClick={onRefresh}
           disabled={isLoadingPrompts}
-          aria-label="Refresh prompts"
+          aria-label={t("web.a11y.refreshPrompts")}
         >
           ↻
         </button>
       </div>
 
       {isLoadingPrompts && prompts.length === 0 ? (
-        <p className="sidebar-prompts-empty">Loading...</p>
+        <p className="sidebar-prompts-empty">{t("web.prompts.loadingPrompts")}</p>
       ) : prompts.length === 0 ? (
-        <p className="sidebar-prompts-empty">No prompts yet</p>
+        <p className="sidebar-prompts-empty">{t("web.prompts.noPrompts")}</p>
       ) : (
         <div className="sidebar-prompts-list">
           {userPrompts.length > 0 && (
             <div className="sidebar-prompts-group">
-              <h4 className="sidebar-prompts-group-label">My Prompts</h4>
+              <h4 className="sidebar-prompts-group-label">{t("web.prompts.myPrompts")}</h4>
               {userPrompts.map((p) => (
                 <button
                   key={p.name}
@@ -72,7 +75,7 @@ export const SidebarPromptsList = ({
 
           {builtinPrompts.length > 0 && (
             <div className="sidebar-prompts-group">
-              <h4 className="sidebar-prompts-group-label">Built-in</h4>
+              <h4 className="sidebar-prompts-group-label">{t("web.prompts.builtin")}</h4>
               {builtinPrompts.map((p) => (
                 <button
                   key={p.name}
@@ -99,13 +102,15 @@ export const SidebarPromptsList = ({
             onClick={onRestoreTerminal}
           >
             <span className="sidebar-prompts-minimized-terminal-icon">{">_"}</span>
-            <span className="sidebar-prompts-minimized-terminal-label">Prompt Engineer</span>
+            <span className="sidebar-prompts-minimized-terminal-label">
+              {t("web.prompts.engineer")}
+            </span>
           </button>
           <button
             type="button"
             className="sidebar-prompts-minimized-terminal-close"
             onClick={onCloseTerminal}
-            aria-label="Close terminal"
+            aria-label={t("web.a11y.closeTerminal")}
           >
             ✕
           </button>

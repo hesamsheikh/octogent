@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
+
 import { FileText, X } from "lucide-react";
 import { buildTerminalSocketUrl } from "../runtime/runtimeEndpoints";
 import { type AgentRuntimeState, AgentStateBadge, isAgentRuntimeState } from "./AgentStateBadge";
@@ -77,6 +79,7 @@ export const Terminal = ({
   onTerminalRenamed,
   onTerminalActivity,
 }: TerminalProps) => {
+  const t = useT();
   const socketRef = useRef<WebSocket | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [connectionState, setConnectionState] = useState("connecting");
@@ -475,7 +478,7 @@ export const Terminal = ({
             <button
               type="button"
               className="terminal-prompt-banner-close"
-              aria-label="Dismiss prompt"
+              aria-label={t("web.terminal.dismissPrompt")}
               onClick={() => {
                 setIsPromptBannerDismissed(true);
               }}
@@ -491,14 +494,14 @@ export const Terminal = ({
                 ref={promptPickerBtnRef}
                 type="button"
                 className="terminal-prompt-picker-btn"
-                title="Insert prompt"
-                aria-label="Insert prompt"
+                title={t("web.terminal.insertPrompt")}
+                aria-label={t("web.terminal.insertPrompt")}
                 onClick={() => {
                   setIsPromptPickerOpen((prev) => !prev);
                 }}
               >
                 <FileText size={13} />
-                <span className="terminal-prompt-picker-label">Prompts</span>
+                <span className="terminal-prompt-picker-label">{t("web.terminal.prompts")}</span>
               </button>
               <TerminalPromptPicker
                 isOpen={isPromptPickerOpen}

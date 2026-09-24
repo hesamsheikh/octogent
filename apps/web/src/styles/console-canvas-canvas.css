@@ -1843,3 +1843,10 @@
   --action-button-padding-x: 0.4rem;
   --action-button-letter-spacing: 0.07em;
 }
+
+/* Completed pill: calm green, no pulse — done work should not demand attention. */
+.canvas-node-waiting-indicator--done .canvas-node-waiting-pill {
+  fill: #22c55e;
+  animation: none;
+  opacity: 0.85;
+}

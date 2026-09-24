@@ -18,5 +18,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./tests/setup.ts",
     include: ["tests/**/*.test.tsx"],
+    // Canvas hydration settles behind timers; the default 5s leaves no room
+    // once several such specs share a worker.
+    testTimeout: 20_000,
   },
 } as never);

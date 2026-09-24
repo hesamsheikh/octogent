@@ -4,6 +4,8 @@ import type { DeckTentacleSummary } from "@octogent/core";
 import { buildConversationsUrl, buildDeckTentaclesUrl } from "../../runtime/runtimeEndpoints";
 import type { GraphEdge, GraphNode } from "../canvas/types";
 import { normalizeConversationSessionSummary } from "../conversationNormalizers";
+import { normalizeDeckTentacleSummary } from "../deckNormalizers";
+import { tentacleColor } from "../fleetColors";
 import type { ConversationSessionSummary, TerminalView } from "../types";
 import type { AgentRuntimeStateInfo } from "./useAgentRuntimeStates";
 
@@ -19,33 +21,6 @@ const getAccentPrimary = (): string =>
   (typeof document !== "undefined"
     ? getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim()
     : "") || "#d4a017";
-
-// Must match the Deck tab's OCTOPUS_COLORS for consistent tentacle colors
-const OCTOPUS_COLORS = [
-  "#ff6b2b",
-  "#ff2d6b",
-  "#00ffaa",
-  "#bf5fff",
-  "#00c8ff",
-  "#ffee00",
-  "#39ff14",
-  "#ff4df0",
-  "#00fff7",
-  "#ff9500",
-];
-
-function hashString(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-const tentacleColor = (tentacleId: string, deckColor: string | null | undefined) =>
-  deckColor && deckColor.length > 0
-    ? deckColor
-    : (OCTOPUS_COLORS[hashString(tentacleId) % OCTOPUS_COLORS.length] as string);
 
 type UseCanvasGraphDataOptions = {
   columns: TerminalView;
@@ -65,91 +40,6 @@ type UseCanvasGraphDataResult = {
 const buildTentacleNodeId = (tentacleId: string) => `t:${tentacleId}`;
 const buildActiveSessionNodeId = (agentId: string) => `a:${agentId}`;
 const buildInactiveSessionNodeId = (sessionId: string) => `i:${sessionId}`;
-
-const normalizeDeckTentacleSummary = (value: unknown): DeckTentacleSummary | null => {
-  if (value === null || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (typeof record.tentacleId !== "string") {
-    return null;
-  }
-
-  const todoItems = Array.isArray(record.todoItems)
-    ? record.todoItems
-        .map((item) => {
-          if (item === null || typeof item !== "object") {
-            return null;
-          }
-
-          const todoRecord = item as Record<string, unknown>;
-          if (typeof todoRecord.text !== "string") {
-            return null;
-          }
-
-          return {
-            text: todoRecord.text,
-            done: todoRecord.done === true,
-          };
-        })
-        .filter((item): item is { text: string; done: boolean } => item !== null)
-    : [];
-
-  const scopeRecord =
-    record.scope !== null && typeof record.scope === "object"
-      ? (record.scope as Record<string, unknown>)
-      : null;
-  const octopusRecord =
-    record.octopus !== null && typeof record.octopus === "object"
-      ? (record.octopus as Record<string, unknown>)
-      : null;
-
-  const status =
-    record.status === "idle" ||
-    record.status === "active" ||
-    record.status === "blocked" ||
-    record.status === "needs-review"
-      ? record.status
-      : "idle";
-
-  return {
-    tentacleId: record.tentacleId,
-    displayName: typeof record.displayName === "string" ? record.displayName : record.tentacleId,
-    description: typeof record.description === "string" ? record.description : "",
-    status,
-    color: typeof record.color === "string" ? record.color : null,
-    octopus: {
-      animation: typeof octopusRecord?.animation === "string" ? octopusRecord.animation : null,
-      expression: typeof octopusRecord?.expression === "string" ? octopusRecord.expression : null,
-      accessory: typeof octopusRecord?.accessory === "string" ? octopusRecord.accessory : null,
-      hairColor: typeof octopusRecord?.hairColor === "string" ? octopusRecord.hairColor : null,
-    },
-    scope: {
-      paths: Array.isArray(scopeRecord?.paths)
-        ? scopeRecord.paths.filter((path): path is string => typeof path === "string")
-        : [],
-      tags: Array.isArray(scopeRecord?.tags)
-        ? scopeRecord.tags.filter((tag): tag is string => typeof tag === "string")
-        : [],
-    },
-    vaultFiles: Array.isArray(record.vaultFiles)
-      ? record.vaultFiles.filter((file): file is string => typeof file === "string")
-      : [],
-    todoTotal:
-      typeof record.todoTotal === "number" && Number.isFinite(record.todoTotal)
-        ? record.todoTotal
-        : todoItems.length,
-    todoDone:
-      typeof record.todoDone === "number" && Number.isFinite(record.todoDone)
-        ? record.todoDone
-        : todoItems.filter((item) => item.done).length,
-    todoItems,
-    suggestedSkills: Array.isArray(record.suggestedSkills)
-      ? record.suggestedSkills.filter((skill): skill is string => typeof skill === "string")
-      : [],
-  };
-};
 
 export const useCanvasGraphData = ({
   columns,
@@ -325,6 +215,9 @@ export const useCanvasGraphData = ({
           ...(activeTerminal.parentTerminalId
             ? { parentTerminalId: activeTerminal.parentTerminalId }
             : {}),
+          ...(activeTerminal.completionSummary
+            ? { completionSummary: activeTerminal.completionSummary }
+            : {}),
           ...(runtimeInfo ? { agentRuntimeState: runtimeInfo.state } : {}),
           ...(runtimeInfo?.toolName ? { waitingToolName: runtimeInfo.toolName } : {}),
         };
@@ -359,9 +252,14 @@ export const useCanvasGraphData = ({
     edges.push({ source: OCTOBOSS_NODE_ID, target: buildTentacleNodeId(tentacleId) });
   }
 
-  // Link active terminals belonging to octoboss
+  // Octoboss-direct terminals, plus any terminal whose tentacle is not on the
+  // deck (CLI quick terminals get synthetic tentacles). Finished ones are kept
+  // so this page shows the same fleet as the flow view; a new dispatch
+  // archives dead husks off both.
   for (const terminal of columns) {
-    if (terminal.tentacleId !== OCTOBOSS_ID) continue;
+    const isNonDeckTerminal =
+      !seenTentacleIds.has(terminal.tentacleId) && terminal.tentacleId !== OCTOBOSS_ID;
+    if (terminal.tentacleId !== OCTOBOSS_ID && !isNonDeckTerminal) continue;
     const sessionNodeId = buildActiveSessionNodeId(terminal.terminalId);
     const prevSession = prevNodes.get(sessionNodeId);
     const jitter = () => (Math.random() - 0.5) * 60;
@@ -384,6 +282,7 @@ export const useCanvasGraphData = ({
       hasUserPrompt: terminal.hasUserPrompt ?? false,
       ...(terminal.workspaceMode ? { workspaceMode: terminal.workspaceMode } : {}),
       ...(terminal.parentTerminalId ? { parentTerminalId: terminal.parentTerminalId } : {}),
+      ...(terminal.completionSummary ? { completionSummary: terminal.completionSummary } : {}),
       ...(bossRuntimeInfo ? { agentRuntimeState: bossRuntimeInfo.state } : {}),
       ...(bossRuntimeInfo?.toolName ? { waitingToolName: bossRuntimeInfo.toolName } : {}),
     };

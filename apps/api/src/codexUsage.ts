@@ -76,6 +76,7 @@ const mapUsageResponse = (response: CodexUsageApiResponse, now: Date): CodexUsag
     secondaryResetAt: toResetIso(secondaryWindow?.reset_at),
     creditsBalance: asNumber(credits?.balance),
     creditsUnlimited: typeof credits?.unlimited === "boolean" ? credits.unlimited : null,
+    limitReached: typeof rateLimit?.limit_reached === "boolean" ? rateLimit.limit_reached : null,
   };
 };
 

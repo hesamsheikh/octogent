@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorkspaceSetupSnapshot, WorkspaceSetupStepId } from "@octogent/core";
 import {
+  CheckCircle2,
   Check as CheckIcon,
   ChevronDown,
   GitBranch,
@@ -23,6 +24,7 @@ import { useCanvasGraphData } from "../app/hooks/useCanvasGraphData";
 import { useCanvasTransform } from "../app/hooks/useCanvasTransform";
 import { DEFAULT_FORCE_PARAMS, useForceSimulation } from "../app/hooks/useForceSimulation";
 import type { PendingDeleteTerminal } from "../app/hooks/useTerminalMutations";
+import { useT } from "../app/providers/LocaleProvider";
 import {
   type TerminalRuntimeStateStore,
   createTerminalRuntimeStateStore,
@@ -56,6 +58,7 @@ type CanvasPrimaryViewProps = {
   runtimeStateStore?: TerminalRuntimeStateStore;
   isUiStateHydrated?: boolean;
   canvasOpenTerminalIds?: string[];
+  deckRevision?: number;
   canvasOpenTentacleIds?: string[];
   canvasTerminalsPanelWidth?: number | null;
   workspaceSetup?: WorkspaceSetupSnapshot | null;
@@ -80,7 +83,6 @@ type CanvasPrimaryViewProps = {
     action: string,
   ) => Promise<string | undefined> | undefined;
   onNavigateToConversation?: (sessionId: string) => void;
-  onCloseActiveSession?: (terminalId: string, terminalName: string, workspaceMode?: string) => void;
   onDeleteActiveSession?: (
     terminalId: string,
     terminalName: string,
@@ -194,6 +196,7 @@ export const CanvasPrimaryView = ({
   runtimeStateStore: providedRuntimeStateStore,
   isUiStateHydrated,
   canvasOpenTerminalIds,
+  deckRevision,
   canvasOpenTentacleIds,
   canvasTerminalsPanelWidth: persistedTerminalsPanelWidth,
   workspaceSetup = null,
@@ -215,7 +218,6 @@ export const CanvasPrimaryView = ({
   onOctobossAction,
   onTentacleAction,
   onNavigateToConversation,
-  onCloseActiveSession,
   onDeleteActiveSession,
   pendingDeleteTerminal,
   isDeletingTerminalId,
@@ -225,6 +227,7 @@ export const CanvasPrimaryView = ({
   onTerminalActivity,
   onRefreshColumns,
 }: CanvasPrimaryViewProps) => {
+  const t = useT();
   const runtimeStateStoreRef = useRef<TerminalRuntimeStateStore | null>(null);
   if (runtimeStateStoreRef.current === null) {
     runtimeStateStoreRef.current = providedRuntimeStateStore ?? createTerminalRuntimeStateStore();
@@ -239,8 +242,10 @@ export const CanvasPrimaryView = ({
   const [terminalsPanelWidth, setTerminalsPanelWidth] = useState<number | null>(null);
   const [pendingOpenAgentId, setPendingOpenAgentId] = useState<string | null>(null);
   const [hideIdleTerminals, setHideIdleTerminals] = useState(false);
+  const [hideCompletedTerminals, setHideCompletedTerminals] = useState(false);
   const [isLaunchingWorkspaceSetupPlanner, setIsLaunchingWorkspaceSetupPlanner] = useState(false);
   const hasHydratedTerminals = useRef(false);
+  const hasRestoredOpenTerminals = useRef(false);
   const hasHydratedTentacles = useRef(false);
   const lastHandledCreatedTerminalIdRef = useRef<string | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -262,6 +267,15 @@ export const CanvasPrimaryView = ({
     refresh: refreshGraphData,
     refreshDeckTentacles,
   } = useCanvasGraphData({ columns, enabled: true, agentRuntimeStates });
+
+  // The server broadcasts when deck content changed elsewhere; refetch so a
+  // tentacle created from the CLI shows up without a manual reload.
+  const lastDeckRevision = useRef(deckRevision);
+  useEffect(() => {
+    if (lastDeckRevision.current === deckRevision) return;
+    lastDeckRevision.current = deckRevision;
+    void refreshDeckTentacles();
+  }, [deckRevision, refreshDeckTentacles]);
 
   const {
     transform,
@@ -357,6 +371,10 @@ export const CanvasPrimaryView = ({
   useEffect(() => {
     if (isHydratingTerminals) return;
     if (!hasHydratedTerminals.current) return;
+    // Restore runs once. Its guard used to be "nothing is open", which fires
+    // again the moment the operator collapses the last panel — the persisted id
+    // list still names it, so the panel reopened and could not be closed.
+    if (hasRestoredOpenTerminals.current) return;
     if (openTerminalCount > 0) return;
     if (!canvasOpenTerminalIds || canvasOpenTerminalIds.length === 0) return;
 
@@ -368,6 +386,7 @@ export const CanvasPrimaryView = ({
       }
     }
     if (restoredMap.size > 0) {
+      hasRestoredOpenTerminals.current = true;
       setOpenTerminals(restoredMap);
     }
 
@@ -561,22 +580,6 @@ export const CanvasPrimaryView = ({
     });
     setSelectedNodeId((prev) => (prev === nodeId ? null : prev));
   }, []);
-
-  const handleCloseTerminal = useCallback(
-    (node: GraphNode) => {
-      if (!node.sessionId) {
-        return;
-      }
-
-      const terminal = columns.find((entry) => entry.terminalId === node.sessionId);
-      onCloseActiveSession?.(
-        node.sessionId,
-        terminal?.tentacleName ?? node.label,
-        terminal?.workspaceMode ?? node.workspaceMode,
-      );
-    },
-    [columns, onCloseActiveSession],
-  );
 
   // Divider drag handlers
   const handleDividerPointerDown = useCallback(
@@ -881,6 +884,7 @@ export const CanvasPrimaryView = ({
       (n.agentState === "idle" || n.hasUserPrompt === false)
     )
       return false;
+    if (hideCompletedTerminals && n.agentState === "completed") return false;
     return true;
   });
 
@@ -974,10 +978,10 @@ export const CanvasPrimaryView = ({
   }, [onLaunchWorkspaceSetupPlanner]);
 
   return (
-    <section ref={containerRef} className="canvas-view" aria-label="Canvas graph view">
+    <section ref={containerRef} className="canvas-view" aria-label={t("web.a11y.canvasGraphView")}>
       <div className={`canvas-graph-panel${hasPanels ? " canvas-graph-panel--split" : ""}`}>
         <svg
-          aria-label="Canvas graph"
+          aria-label={t("web.a11y.canvasGraph")}
           ref={svgRef}
           className={`canvas-svg${isPanning || dragNodeId ? " canvas-svg--panning" : ""}`}
           onWheel={handleWheel}
@@ -1046,6 +1050,7 @@ export const CanvasPrimaryView = ({
                     (n.agentState === "idle" || n.hasUserPrompt === false)
                   )
                     return false;
+                  if (hideCompletedTerminals && n.agentState === "completed") return false;
                   return true;
                 });
 
@@ -1081,7 +1086,7 @@ export const CanvasPrimaryView = ({
         </svg>
 
         {/* Canvas toolbar — top-left action buttons */}
-        <div className="canvas-toolbar" role="toolbar" aria-label="Canvas actions">
+        <div className="canvas-toolbar" role="toolbar" aria-label={t("web.a11y.canvasActions")}>
           <button
             type="button"
             className="canvas-toolbar-btn"
@@ -1097,7 +1102,7 @@ export const CanvasPrimaryView = ({
             <span className="canvas-toolbar-icon">
               <TerminalIcon size={14} />
             </span>
-            <span className="canvas-toolbar-label">Terminal</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.terminal")}</span>
           </button>
           <button
             type="button"
@@ -1114,26 +1119,26 @@ export const CanvasPrimaryView = ({
             <span className="canvas-toolbar-icon">
               <GitBranch size={14} />
             </span>
-            <span className="canvas-toolbar-label">Worktree</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.worktree")}</span>
           </button>
           <button type="button" className="canvas-toolbar-btn" onClick={onCreateTentacle}>
             <span className="canvas-toolbar-icon">
               <Hexagon size={14} />
             </span>
-            <span className="canvas-toolbar-label">Tentacle</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.tentacle")}</span>
           </button>
           <div className="canvas-toolbar-separator" />
           <button type="button" className="canvas-toolbar-btn" onClick={handleFitView}>
             <span className="canvas-toolbar-icon">
               <Maximize size={14} />
             </span>
-            <span className="canvas-toolbar-label">Fit</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.fit")}</span>
           </button>
           <button type="button" className="canvas-toolbar-btn" onClick={handleRefresh}>
             <span className="canvas-toolbar-icon">
               <RefreshCw size={14} />
             </span>
-            <span className="canvas-toolbar-label">Refresh</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.refresh")}</span>
           </button>
           <div className="canvas-toolbar-separator" />
           <button
@@ -1145,7 +1150,23 @@ export const CanvasPrimaryView = ({
               {hideIdleTerminals ? <Play size={14} /> : <Pause size={14} />}
             </span>
             <span className="canvas-toolbar-label">
-              {hideIdleTerminals ? "Show Idle" : "Hide Idle"}
+              {hideIdleTerminals
+                ? t("web.canvas.toolbar.showIdle")
+                : t("web.canvas.toolbar.hideIdle")}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`canvas-toolbar-btn${hideCompletedTerminals ? " canvas-toolbar-btn--active" : ""}`}
+            onClick={() => setHideCompletedTerminals((prev) => !prev)}
+          >
+            <span className="canvas-toolbar-icon">
+              <CheckCircle2 size={14} />
+            </span>
+            <span className="canvas-toolbar-label">
+              {hideCompletedTerminals
+                ? t("web.canvas.toolbar.showCompleted")
+                : t("web.canvas.toolbar.hideCompleted")}
             </span>
           </button>
           <div className="canvas-toolbar-separator" />
@@ -1157,7 +1178,7 @@ export const CanvasPrimaryView = ({
             <span className="canvas-toolbar-icon">
               <Trash2 size={14} />
             </span>
-            <span className="canvas-toolbar-label">Delete All</span>
+            <span className="canvas-toolbar-label">{t("web.canvas.toolbar.deleteAll")}</span>
           </button>
         </div>
 
@@ -1169,8 +1190,8 @@ export const CanvasPrimaryView = ({
               const name = nameRaw.length > 20 ? `${nameRaw.slice(0, 20)}…` : nameRaw;
               const prefix =
                 node.agentRuntimeState === "waiting_for_permission"
-                  ? `${node.waitingToolName ?? "Permission"}: `
-                  : "Waiting: ";
+                  ? `${node.waitingToolName ?? t("web.canvas.waiting.permission")} `
+                  : `${t("web.canvas.waiting.waiting")} `;
               return (
                 <button
                   key={node.id}
@@ -1266,8 +1287,7 @@ export const CanvasPrimaryView = ({
                 layoutVersion={terminalLayoutVersion}
                 isFocused={selectedNodeId === nodeId}
                 panelRef={setPanelRef(nodeId)}
-                onMinimize={() => handleMinimizeTerminal(nodeId)}
-                onClose={() => handleCloseTerminal(node)}
+                onClose={() => handleMinimizeTerminal(nodeId)}
                 onFocus={() => setSelectedNodeId(nodeId)}
                 onTerminalRenamed={onTerminalRenamed}
                 onTerminalActivity={onTerminalActivity}
@@ -1281,7 +1301,7 @@ export const CanvasPrimaryView = ({
       {contextMenu && (
         <>
           <div
-            aria-label="Close canvas context menu"
+            aria-label={t("web.a11y.closeCanvasContextMenu")}
             className="canvas-context-menu-backdrop"
             onClick={() => setContextMenu(null)}
             onContextMenu={(e) => {
@@ -1345,7 +1365,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Hexagon size={14} />
                   </span>
-                  New Tentacle
+                  {t("web.canvas.context.newTentacle")}
                 </button>
                 <button
                   type="button"
@@ -1363,7 +1383,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <TerminalIcon size={14} />
                   </span>
-                  New Terminal
+                  {t("web.canvas.context.newTerminal")}
                 </button>
                 <button
                   type="button"
@@ -1381,7 +1401,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <GitBranch size={14} />
                   </span>
-                  New Worktree Terminal
+                  {t("web.canvas.context.newWorktreeTerminal")}
                 </button>
               </>
             )}
@@ -1395,7 +1415,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <TerminalIcon size={14} />
                   </span>
-                  Create new agent
+                  {t("web.canvas.context.createAgent")}
                 </button>
                 <button
                   type="button"
@@ -1413,7 +1433,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <GitBranch size={14} />
                   </span>
-                  New Worktree Terminal
+                  {t("web.canvas.context.newWorktreeTerminal")}
                 </button>
                 <button
                   type="button"
@@ -1425,7 +1445,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <ListTodo size={14} />
                   </span>
-                  Update To-Do List
+                  {t("web.canvas.context.updateTodo")}
                 </button>
                 <button
                   type="button"
@@ -1437,7 +1457,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Hexagon size={14} />
                   </span>
-                  Update Tentacle
+                  {t("web.canvas.context.updateTentacle")}
                 </button>
                 <button
                   type="button"
@@ -1447,7 +1467,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Layers size={14} />
                   </span>
-                  Spawn Swarm (Worktrees)
+                  {t("web.canvas.context.spawnSwarmWorktree")}
                 </button>
                 <button
                   type="button"
@@ -1457,7 +1477,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Layers size={14} />
                   </span>
-                  Spawn Swarm (Normal)
+                  {t("web.canvas.context.spawnSwarmNormal")}
                 </button>
               </>
             )}
@@ -1471,7 +1491,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <ListTodo size={14} />
                   </span>
-                  Reorganize To-Do's
+                  {t("web.canvas.context.reorganizeTodos")}
                 </button>
                 <button
                   type="button"
@@ -1481,7 +1501,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Hexagon size={14} />
                   </span>
-                  Reorganize Tentacles
+                  {t("web.canvas.context.reorganizeTentacles")}
                 </button>
                 <button
                   type="button"
@@ -1491,7 +1511,7 @@ export const CanvasPrimaryView = ({
                   <span className="canvas-context-menu-icon">
                     <Sparkles size={14} />
                   </span>
-                  Clean Tentacle Contexts
+                  {t("web.canvas.context.cleanContexts")}
                 </button>
               </>
             )}
@@ -1511,7 +1531,7 @@ export const CanvasPrimaryView = ({
                 <span className="canvas-context-menu-icon">
                   <Trash2 size={14} />
                 </span>
-                Delete
+                {t("web.canvas.context.delete")}
               </button>
             )}
           </div>

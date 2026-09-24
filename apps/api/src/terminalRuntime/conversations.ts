@@ -47,6 +47,12 @@ export type StateChangeTranscriptEvent = ConversationTranscriptEventBase & {
   state: AgentRuntimeState;
 };
 
+/** A tool call reported by the agent's PreToolUse hook — the heartbeat of a long turn. */
+export type ToolUseTranscriptEvent = ConversationTranscriptEventBase & {
+  type: "tool_use";
+  toolName: string;
+};
+
 export type SessionEndTranscriptEvent = ConversationTranscriptEventBase & {
   type: "session_end";
   reason: "pty_exit" | "session_close" | "operator_stop" | "operator_kill";
@@ -59,6 +65,7 @@ export type ConversationTranscriptEvent =
   | InputSubmitTranscriptEvent
   | OutputChunkTranscriptEvent
   | StateChangeTranscriptEvent
+  | ToolUseTranscriptEvent
   | SessionEndTranscriptEvent;
 
 export type ConversationTranscriptEventPayload =
@@ -66,6 +73,7 @@ export type ConversationTranscriptEventPayload =
   | Omit<InputSubmitTranscriptEvent, "eventId" | "sessionId" | "tentacleId">
   | Omit<OutputChunkTranscriptEvent, "eventId" | "sessionId" | "tentacleId">
   | Omit<StateChangeTranscriptEvent, "eventId" | "sessionId" | "tentacleId">
+  | Omit<ToolUseTranscriptEvent, "eventId" | "sessionId" | "tentacleId">
   | Omit<SessionEndTranscriptEvent, "eventId" | "sessionId" | "tentacleId">;
 
 export type { ConversationTurn };
@@ -131,6 +139,22 @@ const parseTranscriptEvent = (value: unknown): ConversationTranscriptEvent | nul
       timestamp,
       chunkId,
       text,
+    };
+  }
+
+  if (eventType === "tool_use") {
+    const toolName = asString(value.toolName);
+    if (!toolName) {
+      return null;
+    }
+
+    return {
+      type: "tool_use",
+      eventId,
+      sessionId,
+      tentacleId,
+      timestamp,
+      toolName,
     };
   }
 

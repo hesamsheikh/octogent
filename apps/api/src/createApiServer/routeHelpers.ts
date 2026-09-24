@@ -5,7 +5,10 @@ import type { ClaudeUsageSnapshot } from "../claudeUsage";
 import type { CodeIntelStore } from "../codeIntelStore";
 import type { CodexUsageSnapshot } from "../codexUsage";
 import type { GitHubRepoSummarySnapshot } from "../githubRepoSummary";
+import type { HealthSnapshot } from "../healthSnapshot";
 import type { MonitorService } from "../monitor";
+import { type RuntimeInputError, SessionLimitError } from "../terminalRuntime/types";
+import type { CachedUsageSnapshots } from "../usageExhaustion";
 import { RequestBodyTooLargeError, readJsonBody } from "./requestParsers";
 import { withCors } from "./security";
 
@@ -23,11 +26,14 @@ export type RouteHandlerDependencies = {
   readClaudeOauthUsageSnapshot: () => Promise<ClaudeUsageSnapshot>;
   readClaudeCliUsageSnapshot: () => Promise<ClaudeUsageSnapshot>;
   readCodexUsageSnapshot: () => Promise<CodexUsageSnapshot>;
+  /** Last good usage readings, for checks that must not fetch. */
+  readCachedUsage: () => CachedUsageSnapshots;
   readGithubRepoSummary: () => Promise<GitHubRepoSummarySnapshot>;
   scanUsageHeatmap: (scope: "all" | "project") => Promise<UsageChartResponse>;
   monitorService: MonitorService;
   invalidateClaudeUsageCache: () => void;
   codeIntelStore: CodeIntelStore;
+  readHealthSnapshot: () => HealthSnapshot;
 };
 
 export type RouteHandlerContext = {
@@ -73,6 +79,10 @@ export const writeNoContent = (
   response.end();
 };
 
+/** Status for a runtime refusal on create: a shared session cap is "try later", the rest is bad input. */
+export const runtimeInputErrorStatus = (error: RuntimeInputError): 400 | 429 =>
+  error instanceof SessionLimitError ? 429 : 400;
+
 export const writeMethodNotAllowed = (response: ServerResponse, corsOrigin: string | null) => {
   writeJson(response, 405, { error: "Method not allowed" }, corsOrigin);
 };
@@ -81,9 +91,10 @@ export const readJsonBodyOrWriteError = async (
   request: IncomingMessage,
   response: ServerResponse,
   corsOrigin: string | null,
+  maxBytes?: number,
 ): Promise<JsonBodyReadResult> => {
   try {
-    const payload = await readJsonBody(request);
+    const payload = await readJsonBody(request, maxBytes);
     return { ok: true, payload };
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {

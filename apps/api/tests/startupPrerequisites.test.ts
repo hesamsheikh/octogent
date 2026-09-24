@@ -12,7 +12,7 @@ describe("startup prerequisites", () => {
 
     expect(report.errors).toEqual([]);
     expect(report.warnings).toEqual([]);
-    expect(formatStartupPrerequisiteReport(report)).toEqual([]);
+    expect(formatStartupPrerequisiteReport(report, "en")).toEqual([]);
   });
 
   it("fails startup when no agent CLI is installed", () => {
@@ -28,7 +28,7 @@ describe("startup prerequisites", () => {
 
     expect(report.errors).toEqual([]);
     expect(report.warnings.map((issue) => issue.command)).toEqual(["claude", "git", "gh", "curl"]);
-    expect(formatStartupPrerequisiteReport(report)).toEqual([
+    expect(formatStartupPrerequisiteReport(report, "en")).toEqual([
       "Octogent startup preflight:",
       "  Warning: `claude` is not installed.",
       "    Claude-backed terminals are unavailable. Install Claude Code and run `claude login` if you want the default Claude provider.",

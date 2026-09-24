@@ -47,7 +47,7 @@ const mockShellRequests = () => {
     }
 
     if (url.endsWith("/api/ui-state") && method === "GET") {
-      return jsonResponse({});
+      return jsonResponse({ locale: "en" });
     }
 
     return notFoundResponse();
@@ -70,20 +70,20 @@ describe("App shell and navigation", () => {
     expect(screen.getByLabelText("Main content canvas")).toBeInTheDocument();
     expect(screen.getByLabelText("Telemetry ticker tape")).toBeInTheDocument();
     expect(screen.queryByLabelText("Active Agents sidebar")).not.toBeInTheDocument();
-    expect(screen.getByText("Press 1-8 to navigate")).toBeInTheDocument();
+    expect(screen.getByText("Press 1-9 to navigate")).toBeInTheDocument();
   });
 
-  it("supports keyboard-first primary navigation with number keys 1-8", async () => {
+  it("supports keyboard-first primary navigation with number keys 1-9", async () => {
     mockShellRequests();
 
     render(<App />);
     await screen.findByRole("navigation", { name: "Primary navigation" });
 
-    fireEvent.keyDown(window, { key: "4" });
+    fireEvent.keyDown(window, { key: "5" });
 
     expect(
       screen.getByRole("button", {
-        name: "[4] Code Intel",
+        name: "[5] Code Intel",
       }),
     ).toHaveAttribute("aria-current", "page");
   });
@@ -96,7 +96,7 @@ describe("App shell and navigation", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "[8] Settings",
+        name: "[9] Settings",
       }),
     );
 

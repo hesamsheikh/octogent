@@ -3,6 +3,8 @@ import { type Ref, useCallback, useMemo, useState } from "react";
 
 import type { DeckTentacleSummary, TentacleWorkspaceMode } from "@octogent/core";
 import type { GraphNode } from "../../app/canvas/types";
+import { deriveOctopusVisuals } from "../../app/octopusVisuals";
+import { useT } from "../../app/providers/LocaleProvider";
 import type { ConversationSessionSummary } from "../../app/types";
 import {
   buildDeckTodoAddUrl,
@@ -11,64 +13,7 @@ import {
   buildDeckTodoSolveUrl,
   buildDeckTodoToggleUrl,
 } from "../../runtime/runtimeEndpoints";
-import {
-  type OctopusAccessory,
-  type OctopusAnimation,
-  type OctopusExpression,
-  OctopusGlyph,
-} from "../EmptyOctopus";
-
-const OCTOPUS_COLORS = [
-  "#ff6b2b",
-  "#ff2d6b",
-  "#00ffaa",
-  "#bf5fff",
-  "#00c8ff",
-  "#ffee00",
-  "#39ff14",
-  "#ff4df0",
-  "#00fff7",
-  "#ff9500",
-];
-const ANIMATIONS: OctopusAnimation[] = ["sway", "walk", "jog", "bounce", "float", "swim-up"];
-const EXPRESSIONS: OctopusExpression[] = ["normal", "happy", "angry", "surprised"];
-const ACCESSORIES: OctopusAccessory[] = ["none", "none", "long", "mohawk", "side-sweep", "curly"];
-
-function hashStr(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function seededRng(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 16807 + 0) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
-
-function deriveVisuals(tentacle: DeckTentacleSummary) {
-  const rng = seededRng(hashStr(tentacle.tentacleId));
-  const stored = tentacle.octopus;
-  return {
-    color:
-      tentacle.color ??
-      (OCTOPUS_COLORS[hashStr(tentacle.tentacleId) % OCTOPUS_COLORS.length] as string),
-    animation:
-      (stored?.animation as OctopusAnimation | null) ??
-      (ANIMATIONS[Math.floor(rng() * ANIMATIONS.length)] as OctopusAnimation),
-    expression:
-      (stored?.expression as OctopusExpression | null) ??
-      (EXPRESSIONS[Math.floor(rng() * EXPRESSIONS.length)] as OctopusExpression),
-    accessory:
-      (stored?.accessory as OctopusAccessory | null) ??
-      (ACCESSORIES[Math.floor(rng() * ACCESSORIES.length)] as OctopusAccessory),
-    hairColor: stored?.hairColor ?? undefined,
-  };
-}
+import { OctopusGlyph } from "../EmptyOctopus";
 
 type CanvasTentaclePanelProps = {
   node: GraphNode;
@@ -120,7 +65,8 @@ export const CanvasTentaclePanel = ({
   onNavigateToConversation,
   onRefreshTentacleData,
 }: CanvasTentaclePanelProps) => {
-  const visuals = useMemo(() => (tentacle ? deriveVisuals(tentacle) : null), [tentacle]);
+  const t = useT();
+  const visuals = useMemo(() => (tentacle ? deriveOctopusVisuals(tentacle) : null), [tentacle]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [addingTodo, setAddingTodo] = useState(false);
@@ -129,6 +75,23 @@ export const CanvasTentaclePanel = ({
   const refreshTentacleData = useCallback(async () => {
     await onRefreshTentacleData?.();
   }, [onRefreshTentacleData]);
+
+  const formatRelativeTime = useCallback(
+    (isoString: string | null): string => {
+      if (!isoString) return t("format.null");
+      const d = new Date(isoString);
+      const now = new Date();
+      const diffMs = now.getTime() - d.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return t("web.deck.tentaclePanel.justNow");
+      if (diffMin < 60) return t("web.deck.tentaclePanel.minAgo", { n: diffMin });
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return t("web.deck.tentaclePanel.hourAgo", { n: diffHr });
+      const diffDay = Math.floor(diffHr / 24);
+      return t("web.deck.tentaclePanel.dayAgo", { n: diffDay });
+    },
+    [t],
+  );
 
   const handleTodoToggle = useCallback(
     async (itemIndex: number, done: boolean) => {
@@ -245,10 +208,19 @@ export const CanvasTentaclePanel = ({
         <span className="detail-title">{tentacle?.displayName ?? node.label}</span>
         {tentacle && (
           <span className="detail-type-badge">
-            {STATUS_LABELS[tentacle.status] ?? tentacle.status}
+            {t(
+              tentacle.status === "needs-review"
+                ? "agentState.review"
+                : `agentState.${tentacle.status}`,
+            )}
           </span>
         )}
-        <button className="detail-close" type="button" onClick={onClose} aria-label="Close panel">
+        <button
+          className="detail-close"
+          type="button"
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
           <X size={14} />
         </button>
       </div>
@@ -272,12 +244,12 @@ export const CanvasTentaclePanel = ({
           <div className="detail-identity-info">
             <div className="detail-name">{tentacle?.displayName ?? node.label}</div>
             <div className="detail-row">
-              <span className="detail-label">ID</span>
+              <span className="detail-label">{t("common.id")}</span>
               <span className="detail-value detail-value--mono">{node.tentacleId}</span>
             </div>
             {tentacle?.description && (
               <div className="detail-row">
-                <span className="detail-label">Description</span>
+                <span className="detail-label">{t("common.description")}</span>
                 <span className="detail-value">{tentacle.description}</span>
               </div>
             )}
@@ -286,28 +258,28 @@ export const CanvasTentaclePanel = ({
 
         {/* Actions section */}
         <div className="detail-section">
-          <div className="detail-section-title">Actions</div>
+          <div className="detail-section-title">{t("common.actions")}</div>
           <div className="detail-actions">
             <button
               type="button"
               className="detail-action-btn"
               onClick={() => onCreateAgent?.(node.tentacleId)}
             >
-              &gt;_ Create Agent
+              {t("web.deck.tentaclePanel.createAgent")}
             </button>
             <button
               type="button"
               className="detail-action-btn"
               onClick={() => onSpawnSwarm?.(node.tentacleId, "worktree")}
             >
-              &#x2263; Spawn Swarm (Worktrees)
+              {t("web.deck.tentaclePanel.spawnSwarmWorktrees")}
             </button>
             <button
               type="button"
               className="detail-action-btn"
               onClick={() => onSpawnSwarm?.(node.tentacleId, "shared")}
             >
-              &#x2263; Spawn Swarm (Normal)
+              {t("web.deck.tentaclePanel.spawnSwarmNormal")}
             </button>
           </div>
         </div>
@@ -315,7 +287,7 @@ export const CanvasTentaclePanel = ({
         {/* Progress section */}
         {tentacle && (
           <div className="detail-section">
-            <div className="detail-section-title">Progress</div>
+            <div className="detail-section-title">{t("common.progress")}</div>
             {tentacle.todoTotal > 0 && (
               <div className="detail-progress">
                 <div className="detail-progress-bar">
@@ -340,7 +312,7 @@ export const CanvasTentaclePanel = ({
                       <button
                         type="button"
                         className="detail-todo-delete"
-                        title="Delete item"
+                        title={t("web.deck.tentaclePanel.deleteItem")}
                         onClick={() => void handleTodoDelete(i)}
                       >
                         <X size={12} />
@@ -348,8 +320,8 @@ export const CanvasTentaclePanel = ({
                       <button
                         type="button"
                         className="detail-todo-solve"
-                        aria-label={`Spawn agent for todo item: ${item.text}`}
-                        title="Spawn agent for this item"
+                        aria-label={t("web.deck.tentaclePanel.spawnForTodo", { text: item.text })}
+                        title={t("web.deck.tentaclePanel.spawnForItem")}
                         disabled={item.done || solvingTodoIndex === i}
                         onClick={() => void handleTodoSolve(i)}
                       >
@@ -393,7 +365,7 @@ export const CanvasTentaclePanel = ({
                 <input
                   className="detail-todo-edit-input"
                   type="text"
-                  placeholder="New todo item…"
+                  placeholder={t("web.deck.tentaclePanel.newTodoPlaceholder")}
                   value={addText}
                   onChange={(e) => setAddText(e.target.value)}
                   onKeyDown={(e) => {
@@ -419,7 +391,7 @@ export const CanvasTentaclePanel = ({
                 className="detail-todo-add-btn"
                 onClick={() => setAddingTodo(true)}
               >
-                + Add item
+                {t("web.deck.tentaclePanel.addItem")}
               </button>
             )}
           </div>
@@ -428,7 +400,7 @@ export const CanvasTentaclePanel = ({
         {/* Vault files */}
         {tentacle && tentacle.vaultFiles.length > 0 && (
           <div className="detail-section">
-            <div className="detail-section-title">Vault Files</div>
+            <div className="detail-section-title">{t("web.deck.tentaclePanel.vaultFiles")}</div>
             <div className="detail-labels-list">
               {tentacle.vaultFiles.map((file) => (
                 <span key={file} className="detail-label-tag">
@@ -441,7 +413,9 @@ export const CanvasTentaclePanel = ({
 
         {tentacle && tentacle.suggestedSkills.length > 0 && (
           <div className="detail-section">
-            <div className="detail-section-title">Suggested Skills</div>
+            <div className="detail-section-title">
+              {t("web.deck.tentaclePanel.suggestedSkills")}
+            </div>
             <div className="detail-labels-list">
               {tentacle.suggestedSkills.map((skill) => (
                 <span key={skill} className="detail-label-tag">
@@ -454,9 +428,11 @@ export const CanvasTentaclePanel = ({
 
         {/* Sessions section */}
         <div className="detail-section">
-          <div className="detail-section-title">Sessions ({sessions.length})</div>
+          <div className="detail-section-title">
+            {t("web.deck.tentaclePanel.sessions", { n: sessions.length })}
+          </div>
           {sessions.length === 0 ? (
-            <div className="detail-empty">No sessions yet</div>
+            <div className="detail-empty">{t("web.deck.tentaclePanel.noSessions")}</div>
           ) : (
             <div className="detail-sessions">
               {sessions.map((s) => (
@@ -472,7 +448,8 @@ export const CanvasTentaclePanel = ({
                       : s.sessionId.slice(0, 16)}
                   </span>
                   <span className="detail-session-meta">
-                    {s.turnCount} turns · {formatTime(s.lastEventAt)}
+                    {t("web.deck.tentaclePanel.turns", { n: s.turnCount })} ·{" "}
+                    {formatRelativeTime(s.lastEventAt)}
                   </span>
                 </button>
               ))}

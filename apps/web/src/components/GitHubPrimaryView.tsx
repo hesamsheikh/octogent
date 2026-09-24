@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { GITHUB_OVERVIEW_GRAPH_HEIGHT, GITHUB_OVERVIEW_GRAPH_WIDTH } from "../app/constants";
 import { formatGitHubCommitHoverLabel } from "../app/githubMetrics";
+import { useT } from "../app/providers/LocaleProvider";
+import { useLocale } from "../app/providers/LocaleProvider";
 import type { GitHubCommitSparkPoint, GitHubRecentCommit } from "../app/types";
 import { ActionButton } from "./ui/ActionButton";
 
@@ -25,10 +27,10 @@ type GitHubPrimaryViewProps = {
 const GITHUB_OVERVIEW_GRAPH_VIEWBOX_INSET = 8;
 const GITHUB_RECENT_COMMITS_LIMIT = 50;
 
-const formatSparkDate = (date: string): string => {
+const formatSparkDate = (date: string, locale = "en-US"): string => {
   if (date.startsWith("n/a")) return "";
   const d = new Date(`${date}T00:00:00`);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
 };
 
 const buildCommitYTicks = (series: GitHubCommitSparkPoint[]): { count: number; y: number }[] => {
@@ -58,13 +60,13 @@ const buildAreaPolygonPoints = (series: GitHubCommitSparkPoint[]): string => {
   return `${first.x.toFixed(1)},${H} ${linePoints} ${last.x.toFixed(1)},${H}`;
 };
 
-const formatRecentCommitTimestamp = (value: string) => {
+const formatRecentCommitTimestamp = (value: string, locale = "en-US") => {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) {
     return value;
   }
 
-  return new Date(parsed).toLocaleString("en-US", {
+  return new Date(parsed).toLocaleString(locale, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -88,6 +90,8 @@ export const GitHubPrimaryView = ({
   hoveredGitHubOverviewPointIndex,
   onHoveredGitHubOverviewPointIndexChange,
 }: GitHubPrimaryViewProps) => {
+  const t = useT();
+  const locale = useLocale();
   const [hoverCursorPosition, setHoverCursorPosition] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -135,33 +139,36 @@ export const GitHubPrimaryView = ({
       ? (githubOverviewGraphSeries[hoveredGitHubOverviewPointIndex] ?? null)
       : null;
   const tooltipLabel = hoveredGitHubOverviewPoint
-    ? formatGitHubCommitHoverLabel(hoveredGitHubOverviewPoint)
+    ? formatGitHubCommitHoverLabel(hoveredGitHubOverviewPoint, locale)
     : null;
 
   return (
-    <section className="github-view" aria-label="GitHub primary view">
-      <section className="github-overview" aria-label="GitHub overview">
+    <section className="github-view" aria-label={t("web.a11y.githubView")}>
+      <section className="github-overview" aria-label={t("web.a11y.githubOverview")}>
         <header className="github-overview-header">
           <h2>{githubRepoLabel}</h2>
           <div className="github-overview-header-actions">
             <span className="console-status-pill">{githubStatusPill}</span>
             <ActionButton
-              aria-label="Refresh GitHub overview data"
+              aria-label={t("web.a11y.refreshGithubOverview")}
               className="github-overview-refresh"
               disabled={isRefreshingGitHubSummary}
               onClick={onRefresh}
               size="dense"
               variant="accent"
             >
-              {isRefreshingGitHubSummary ? "Refreshing..." : "Refresh"}
+              {isRefreshingGitHubSummary ? t("web.github.refreshing") : t("web.github.refresh")}
             </ActionButton>
           </div>
         </header>
         <div className="github-overview-content">
           <section className="github-overview-main">
-            <section className="github-overview-graph" aria-label="GitHub commits graph">
+            <section
+              className="github-overview-graph"
+              aria-label={t("web.a11y.githubCommitsGraph")}
+            >
               <div className="github-overview-graph-meta">
-                <strong>Commits Per Day</strong>
+                <strong>{t("web.github.commitsPerDay")}</strong>
                 <span>{githubOverviewHoverLabel}</span>
               </div>
               <div className="github-overview-graph-surface">
@@ -252,7 +259,7 @@ export const GitHubPrimaryView = ({
                   {githubOverviewGraphSeries
                     .filter((_, i) => i % xLabelStep === 0)
                     .map((point) => {
-                      const label = formatSparkDate(point.date);
+                      const label = formatSparkDate(point.date, locale);
                       if (!label) return null;
                       return (
                         <text
@@ -268,7 +275,7 @@ export const GitHubPrimaryView = ({
 
                   {githubOverviewGraphSeries.map((point, index) => (
                     <circle
-                      aria-label={formatGitHubCommitHoverLabel(point)}
+                      aria-label={formatGitHubCommitHoverLabel(point, locale)}
                       className={`github-overview-graph-point${
                         hoveredGitHubOverviewPointIndex === index ? " is-active" : ""
                       }`}
@@ -284,7 +291,7 @@ export const GitHubPrimaryView = ({
                       r={6}
                       tabIndex={0}
                     >
-                      <title>{formatGitHubCommitHoverLabel(point)}</title>
+                      <title>{formatGitHubCommitHoverLabel(point, locale)}</title>
                     </circle>
                   ))}
                 </svg>
@@ -303,14 +310,14 @@ export const GitHubPrimaryView = ({
             </section>
           </section>
 
-          <aside className="github-overview-side" aria-label="GitHub recent activity">
-            <dl className="github-overview-stats" aria-label="Repository stats">
+          <aside className="github-overview-side" aria-label={t("web.a11y.githubRecentActivity")}>
+            <dl className="github-overview-stats" aria-label={t("web.a11y.repositoryStats")}>
               <div
-                aria-label={`Stars ${githubStarCountLabel}`}
+                aria-label={`${t("web.github.stars")} ${githubStarCountLabel}`}
                 className="github-overview-stat"
                 data-metric="st"
-                data-label="Stars"
-                title="Stars"
+                data-label={t("web.github.stars")}
+                title={t("web.github.stars")}
               >
                 <dt>
                   <span aria-hidden="true" className="github-overview-stat-icon">
@@ -322,11 +329,11 @@ export const GitHubPrimaryView = ({
                 <dd>{githubStarCountLabel}</dd>
               </div>
               <div
-                aria-label={`Open issues ${githubOpenIssuesLabel}`}
+                aria-label={`${t("web.github.openIssues")} ${githubOpenIssuesLabel}`}
                 className="github-overview-stat"
                 data-metric="is"
-                data-label="Open issues"
-                title="Open issues"
+                data-label={t("web.github.openIssues")}
+                title={t("web.github.openIssues")}
               >
                 <dt>
                   <span aria-hidden="true" className="github-overview-stat-icon">
@@ -339,11 +346,11 @@ export const GitHubPrimaryView = ({
                 <dd>{githubOpenIssuesLabel}</dd>
               </div>
               <div
-                aria-label={`Open PRs ${githubOpenPrsLabel}`}
+                aria-label={`${t("web.github.openPrs")} ${githubOpenPrsLabel}`}
                 className="github-overview-stat"
                 data-metric="pr"
-                data-label="Open PRs"
-                title="Open PRs"
+                data-label={t("web.github.openPrs")}
+                title={t("web.github.openPrs")}
               >
                 <dt>
                   <span aria-hidden="true" className="github-overview-stat-icon">
@@ -355,11 +362,11 @@ export const GitHubPrimaryView = ({
                 <dd>{githubOpenPrsLabel}</dd>
               </div>
               <div
-                aria-label={`Commits in 30 days ${githubCommitCount30d}`}
+                aria-label={`${t("web.github.commits30d")} ${githubCommitCount30d}`}
                 className="github-overview-stat"
                 data-metric="30d"
-                data-label="Commits (30d)"
-                title="Commits (30d)"
+                data-label={t("web.github.commits30d")}
+                title={t("web.github.commits30d")}
               >
                 <dt>
                   <span aria-hidden="true" className="github-overview-stat-icon">
@@ -373,12 +380,12 @@ export const GitHubPrimaryView = ({
             </dl>
             <section
               className="github-overview-recent"
-              aria-label="Recent commits"
+              aria-label={t("web.a11y.recentCommits")}
               ref={recentSectionRef}
             >
               <header className="github-overview-recent-header">
-                <h3>Recent commits</h3>
-                <span>{`Showing last ${GITHUB_RECENT_COMMITS_LIMIT}`}</span>
+                <h3>{t("web.github.recentCommits")}</h3>
+                <span>{t("web.github.showingLast", { count: GITHUB_RECENT_COMMITS_LIMIT })}</span>
               </header>
               {githubRecentCommits.length > 0 ? (
                 <ol className="github-overview-recent-list">
@@ -424,7 +431,7 @@ export const GitHubPrimaryView = ({
                           <p className="github-overview-recent-subject">{commit.subject}</p>
                           <p className="github-overview-recent-meta">
                             <span>{commit.authorName}</span>
-                            <span>{formatRecentCommitTimestamp(commit.authoredAt)}</span>
+                            <span>{formatRecentCommitTimestamp(commit.authoredAt, locale)}</span>
                           </p>
                         </div>
                       </button>
@@ -432,7 +439,7 @@ export const GitHubPrimaryView = ({
                   ))}
                 </ol>
               ) : (
-                <p className="github-overview-recent-empty">Recent commit data is unavailable.</p>
+                <p className="github-overview-recent-empty">{t("web.github.noData")}</p>
               )}
               <div
                 ref={tooltipRef}
@@ -448,7 +455,7 @@ export const GitHubPrimaryView = ({
                       <button
                         className="github-overview-recent-tooltip-copy"
                         type="button"
-                        title="Copy full hash"
+                        title={t("web.github.copyHash")}
                         onClick={() => {
                           navigator.clipboard.writeText(activeCommit.hash);
                         }}
@@ -472,7 +479,9 @@ export const GitHubPrimaryView = ({
                       <p className="github-overview-recent-tooltip-diff">
                         <span>
                           {activeCommit.filesChanged}{" "}
-                          {activeCommit.filesChanged === 1 ? "file" : "files"}
+                          {activeCommit.filesChanged === 1
+                            ? t("web.github.file")
+                            : t("web.github.files")}
                         </span>
                         <span className="github-overview-recent-tooltip-ins">
                           +{activeCommit.insertions}

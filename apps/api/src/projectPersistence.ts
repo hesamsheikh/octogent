@@ -6,12 +6,21 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
-export const GLOBAL_OCTOGENT_DIR = join(homedir(), ".octogent");
+import { assignUniqueSlug, toProjectSlug } from "./projectSlug";
+
+// OCTOGENT_HOME relocates the global state root. Tests point it at a temp
+// directory so a run cannot register throwaway projects into the operator's
+// real ~/.octogent registry; operators can use it to keep isolated roots.
+export const resolveGlobalOctogentDir = (): string =>
+  process.env.OCTOGENT_HOME?.trim() || join(homedir(), ".octogent");
+
+export const GLOBAL_OCTOGENT_DIR = resolveGlobalOctogentDir();
 export const PROJECTS_FILE = join(GLOBAL_OCTOGENT_DIR, "projects.json");
 export const PROJECT_CONFIG_RELATIVE_PATH = join(".octogent", "project.json");
 
@@ -28,6 +37,10 @@ export type ProjectRegistryEntry = {
   path: string;
   createdAt: string;
   lastOpenedAt?: string;
+  /** URL key for the hub (`/p/<slug>/`); backfilled on load for older registries. */
+  slug?: string;
+  /** Slugs this project answered to before a rename, so old links keep resolving. */
+  aliases?: string[];
 };
 
 type LegacyProjectRegistryEntry = {
@@ -40,6 +53,19 @@ export type ProjectsRegistry = { projects: ProjectRegistryEntry[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isWellFormedSlug = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && toProjectSlug(value) === value;
+
+const readSlugFields = (
+  value: Record<string, unknown>,
+): Pick<ProjectRegistryEntry, "slug" | "aliases"> => {
+  const aliases = Array.isArray(value.aliases) ? value.aliases.filter(isWellFormedSlug) : [];
+  return {
+    ...(isWellFormedSlug(value.slug) ? { slug: value.slug } : {}),
+    ...(aliases.length > 0 ? { aliases } : {}),
+  };
+};
 
 const toProjectRegistryEntry = (
   value: unknown,
@@ -67,6 +93,7 @@ const toProjectRegistryEntry = (
       ...(typeof value.lastOpenedAt === "string" && value.lastOpenedAt.trim().length > 0
         ? { lastOpenedAt: value.lastOpenedAt }
         : {}),
+      ...readSlugFields(value),
     };
   }
 
@@ -139,16 +166,53 @@ export const loadProjectsRegistry = (): ProjectsRegistry => {
     return { projects: [] };
   }
 
-  return {
+  const registry = {
     projects: parsed.projects
       .map((entry) => toProjectRegistryEntry(entry))
       .filter((entry): entry is ProjectRegistryEntry => entry !== null),
   };
+  if (backfillProjectSlugs(registry)) {
+    try {
+      saveProjectsRegistry(registry);
+    } catch {
+      // A read-only registry still resolves: the slugs just are not persisted.
+    }
+  }
+  return registry;
+};
+
+/**
+ * Gives every entry a unique slug. Existing slugs are kept (first one wins on
+ * a duplicate) so URLs stay stable; only missing or clashing ones are
+ * assigned, after all kept slugs are known. Returns whether anything changed.
+ */
+const backfillProjectSlugs = (registry: ProjectsRegistry): boolean => {
+  const kept = new Set<string>();
+  const needsSlug: ProjectRegistryEntry[] = [];
+  for (const project of registry.projects) {
+    if (project.slug && !kept.has(project.slug)) {
+      kept.add(project.slug);
+      continue;
+    }
+    needsSlug.push(project);
+  }
+
+  // Excluding the entry's own id means a clashing slug it still carries does
+  // not count against it.
+  for (const project of needsSlug) {
+    project.slug = assignUniqueSlug(registry, project.name, project.id);
+  }
+  return needsSlug.length > 0;
 };
 
 export const saveProjectsRegistry = (registry: ProjectsRegistry) => {
   ensureGlobalOctogentDir();
-  writeFileSync(PROJECTS_FILE, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+  // Written aside and renamed into place: a hub, CLI calls, and other servers
+  // all read this file, and one that catches it half-written sees an empty
+  // registry and would save that back over everyone's projects.
+  const temporaryPath = `${PROJECTS_FILE}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+  renameSync(temporaryPath, PROJECTS_FILE);
 };
 
 export const resolveProjectConfigPath = (workspaceCwd: string) =>
@@ -219,6 +283,17 @@ export const registerProject = (
   const existing = registry.projects.find((entry) => entry.id === projectConfig.projectId);
 
   if (existing) {
+    if (existing.name !== projectConfig.displayName || !existing.slug) {
+      const nextSlug = assignUniqueSlug(registry, projectConfig.displayName, existing.id);
+      const aliases = (existing.aliases ?? []).filter((alias) => alias !== nextSlug);
+      if (existing.slug && existing.slug !== nextSlug && !aliases.includes(existing.slug)) {
+        aliases.push(existing.slug);
+      }
+      existing.slug = nextSlug;
+      if (aliases.length > 0 || existing.aliases) {
+        existing.aliases = aliases;
+      }
+    }
     existing.name = projectConfig.displayName;
     existing.path = workspaceCwd;
     existing.lastOpenedAt = lastOpenedAt;
@@ -226,17 +301,17 @@ export const registerProject = (
     return existing;
   }
 
+  const filteredProjects = registry.projects.filter(
+    (entry) => entry.path !== workspaceCwd && entry.id !== projectConfig.projectId,
+  );
   const nextEntry: ProjectRegistryEntry = {
     id: projectConfig.projectId,
     name: projectConfig.displayName,
     path: workspaceCwd,
     createdAt: projectConfig.createdAt,
     lastOpenedAt,
+    slug: assignUniqueSlug({ projects: filteredProjects }, projectConfig.displayName),
   };
-
-  const filteredProjects = registry.projects.filter(
-    (entry) => entry.path !== workspaceCwd && entry.id !== projectConfig.projectId,
-  );
   filteredProjects.push(nextEntry);
   saveProjectsRegistry({ projects: filteredProjects });
   return nextEntry;
@@ -244,6 +319,9 @@ export const registerProject = (
 
 export const resolveGlobalProjectDir = (projectId: string) =>
   join(GLOBAL_OCTOGENT_DIR, "projects", projectId);
+
+/** Hub-wide state (its server log) that belongs to no single project. */
+export const resolveHubStateDir = () => join(GLOBAL_OCTOGENT_DIR, "hub");
 
 export const resolveEphemeralProjectStateDir = (workspaceCwd: string) =>
   resolveGlobalProjectDir(deriveProjectIdFromWorkspace(workspaceCwd));
@@ -319,6 +397,17 @@ export const migrateStateToGlobal = (workspaceCwd: string, projectStateDir: stri
   const oldStateDir = join(fallbackProjectDir, "state");
   const newStateDir = join(projectStateDir, "state");
 
+  // A dashboard started before `octogent init` parks its state in the
+  // path-derived ephemeral root; without it as a source, everything created in
+  // that first session (terminals and their worktrees) is orphaned on init.
+  const ephemeralStateDir = join(resolveEphemeralProjectStateDir(workspaceCwd), "state");
+
+  const sourceStateDirs = [
+    oldStateDir,
+    legacyGlobalProjectDir ? join(legacyGlobalProjectDir, "state") : null,
+    ephemeralStateDir,
+  ].filter((dir): dir is string => dir !== null && dir !== newStateDir && existsSync(dir));
+
   mkdirSync(newStateDir, { recursive: true });
 
   const stateFiles = [
@@ -331,6 +420,10 @@ export const migrateStateToGlobal = (workspaceCwd: string, projectStateDir: stri
     "runtime.json",
   ];
 
+  // First source wins, so the list above doubles as the precedence order.
+  const findSource = (relativePath: string) =>
+    sourceStateDirs.map((dir) => join(dir, relativePath)).find((path) => existsSync(path));
+
   let migrated = 0;
   for (const file of stateFiles) {
     const destination = join(newStateDir, file);
@@ -338,36 +431,19 @@ export const migrateStateToGlobal = (workspaceCwd: string, projectStateDir: stri
       continue;
     }
 
-    const localSource = join(oldStateDir, file);
-    if (existsSync(localSource)) {
-      copyFileSync(localSource, destination);
-      migrated += 1;
-      continue;
-    }
-
-    if (!legacyGlobalProjectDir) {
-      continue;
-    }
-
-    const legacySource = join(legacyGlobalProjectDir, "state", file);
-    if (existsSync(legacySource)) {
-      copyFileSync(legacySource, destination);
+    const source = findSource(file);
+    if (source) {
+      copyFileSync(source, destination);
       migrated += 1;
     }
   }
 
   const transcriptDestination = join(newStateDir, "transcripts");
   if (!existsSync(transcriptDestination)) {
-    const localTranscriptSource = join(oldStateDir, "transcripts");
-    if (existsSync(localTranscriptSource)) {
-      cpSync(localTranscriptSource, transcriptDestination, { recursive: true });
+    const transcriptSource = findSource("transcripts");
+    if (transcriptSource) {
+      cpSync(transcriptSource, transcriptDestination, { recursive: true });
       migrated += 1;
-    } else if (legacyGlobalProjectDir) {
-      const legacyTranscriptSource = join(legacyGlobalProjectDir, "state", "transcripts");
-      if (existsSync(legacyTranscriptSource)) {
-        cpSync(legacyTranscriptSource, transcriptDestination, { recursive: true });
-        migrated += 1;
-      }
     }
   }
 

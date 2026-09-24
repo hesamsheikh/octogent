@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useT } from "../app/providers/LocaleProvider";
 import type { PromptDetail, PromptLibraryEntry } from "../app/types";
 import { buildPromptItemUrl, buildPromptsUrl } from "../runtime/runtimeEndpoints";
 
@@ -16,6 +17,7 @@ export const TerminalPromptPicker = ({
   onClose,
   onSelectPrompt,
 }: TerminalPromptPickerProps) => {
+  const t = useT();
   const [prompts, setPrompts] = useState<PromptLibraryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -92,16 +94,16 @@ export const TerminalPromptPicker = ({
 
   return (
     <div className="prompt-picker-popover" ref={popoverRef} style={style}>
-      <div className="prompt-picker-header">Insert Prompt</div>
+      <div className="prompt-picker-header">{t("web.prompts.insertPrompt")}</div>
       {isLoading ? (
-        <div className="prompt-picker-loading">Loading...</div>
+        <div className="prompt-picker-loading">{t("common.loading")}</div>
       ) : prompts.length === 0 ? (
-        <div className="prompt-picker-empty">No prompts available</div>
+        <div className="prompt-picker-empty">{t("web.prompts.noAvailable")}</div>
       ) : (
         <div className="prompt-picker-list">
           {userPrompts.length > 0 && (
             <div className="prompt-picker-group">
-              <div className="prompt-picker-group-label">My Prompts</div>
+              <div className="prompt-picker-group-label">{t("web.prompts.myPrompts")}</div>
               {userPrompts.map((p) => (
                 <button
                   key={p.name}
@@ -118,7 +120,7 @@ export const TerminalPromptPicker = ({
           )}
           {builtinPrompts.length > 0 && (
             <div className="prompt-picker-group">
-              <div className="prompt-picker-group-label">Built-in</div>
+              <div className="prompt-picker-group-label">{t("web.prompts.builtin")}</div>
               {builtinPrompts.map((p) => (
                 <button
                   key={p.name}

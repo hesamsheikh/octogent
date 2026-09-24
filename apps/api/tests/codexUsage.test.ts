@@ -39,6 +39,7 @@ describe("readCodexUsageSnapshot", () => {
           JSON.stringify({
             plan_type: "pro",
             rate_limit: {
+              limit_reached: false,
               primary_window: {
                 used_percent: 19,
                 reset_at: 1_766_948_068,
@@ -92,6 +93,7 @@ describe("readCodexUsageSnapshot", () => {
         secondaryUsedPercent: 44,
         creditsBalance: 123.45,
         creditsUnlimited: false,
+        limitReached: false,
       }),
     );
     expect(snapshot.primaryResetAt).toBe("2025-12-28T18:54:28.000Z");

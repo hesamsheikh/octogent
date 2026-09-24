@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { buildTerminalUrl, buildTerminalsUrl } from "../../runtime/runtimeEndpoints";
 import type { TerminalAgentProvider, TerminalView, TerminalWorkspaceMode } from "../types";
 
 export type PendingDeleteTerminal = {
@@ -89,8 +90,7 @@ export const useTerminalMutations = ({
 
       try {
         setLoadError(null);
-        const encodedTerminalId = encodeURIComponent(terminalId);
-        const response = await fetch(`/api/terminals/${encodedTerminalId}`, {
+        const response = await fetch(buildTerminalUrl(terminalId), {
           method: "PATCH",
           headers: {
             Accept: "application/json",
@@ -122,7 +122,7 @@ export const useTerminalMutations = ({
       try {
         setIsCreatingTerminal(true);
         setLoadError(null);
-        const response = await fetch("/api/terminals", {
+        const response = await fetch(buildTerminalsUrl(), {
           method: "POST",
           headers: {
             Accept: "application/json",
@@ -200,8 +200,7 @@ export const useTerminalMutations = ({
     try {
       setLoadError(null);
       setIsDeletingTerminalId(terminalId);
-      const encodedTerminalId = encodeURIComponent(terminalId);
-      const response = await fetch(`/api/terminals/${encodedTerminalId}`, {
+      const response = await fetch(buildTerminalUrl(terminalId), {
         method: "DELETE",
         headers: {
           Accept: "application/json",

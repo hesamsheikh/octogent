@@ -26,22 +26,43 @@ const parseHostname = (value: string, withScheme: boolean): string | null => {
   }
 };
 
-export const isAllowedOriginHeader = (origin: string | undefined, allowRemoteAccess: boolean) => {
-  if (allowRemoteAccess || origin === undefined) {
+export const isAllowedOriginHeader = (
+  origin: string | undefined,
+  host: string | undefined,
+  isRemoteBinding: boolean,
+) => {
+  if (origin === undefined) {
     return true;
   }
 
-  const hostname = parseHostname(origin, true);
-  return hostname !== null && isLoopbackHostname(hostname);
-};
+  const originHostname = parseHostname(origin, true);
+  if (originHostname === null) {
+    return false;
+  }
 
-export const isAllowedHostHeader = (host: string | undefined, allowRemoteAccess: boolean) => {
-  if (allowRemoteAccess) {
-    return true;
+  if (!isRemoteBinding) {
+    return isLoopbackHostname(originHostname);
   }
 
   if (!host) {
     return false;
+  }
+
+  const hostHostname = parseHostname(host, false);
+  return (
+    hostHostname !== null &&
+    (originHostname.toLowerCase() === hostHostname.toLowerCase() ||
+      (isLoopbackHostname(originHostname) && isLoopbackHostname(hostHostname)))
+  );
+};
+
+export const isAllowedHostHeader = (host: string | undefined, isRemoteBinding: boolean) => {
+  if (!host) {
+    return false;
+  }
+
+  if (isRemoteBinding) {
+    return true;
   }
 
   const hostname = parseHostname(host, false);
@@ -57,12 +78,16 @@ export const readHeaderValue = (header: string | string[] | undefined): string |
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-export const getRequestCorsOrigin = (origin: string | undefined, allowRemoteAccess: boolean) => {
+export const getRequestCorsOrigin = (
+  origin: string | undefined,
+  host: string | undefined,
+  isRemoteBinding: boolean,
+) => {
   if (!origin) {
     return null;
   }
 
-  if (!allowRemoteAccess && !isAllowedOriginHeader(origin, allowRemoteAccess)) {
+  if (!isAllowedOriginHeader(origin, host, isRemoteBinding)) {
     return null;
   }
 

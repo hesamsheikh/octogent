@@ -3,6 +3,7 @@ import type {
   AgentState,
   DeckOctopusAppearance,
   TentacleWorkspaceMode,
+  TerminalCompletionSummary,
 } from "@octogent/core";
 
 export type GraphNode = {
@@ -19,6 +20,7 @@ export type GraphNode = {
   color: string;
   sessionId?: string;
   agentState?: AgentState;
+  completionSummary?: TerminalCompletionSummary;
   agentRuntimeState?: AgentRuntimeState;
   waitingToolName?: string;
   hasUserPrompt?: boolean;

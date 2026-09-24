@@ -96,7 +96,7 @@ const main = async () => {
     writeProviderStub();
 
     console.log("Building package artifacts...");
-    runChecked("pnpm", ["build"], {
+    runChecked(process.execPath, [join(repoRoot, "scripts", "build.mjs")], {
       cwd: repoRoot,
       env: process.env,
     });
@@ -124,11 +124,18 @@ const main = async () => {
       env: npmEnv,
     });
 
-    console.log("Launching packaged Octogent in a fresh workspace...");
     const octogentBin =
       process.platform === "win32"
         ? join(installDir, "node_modules", ".bin", "octogent.cmd")
         : join(installDir, "node_modules", ".bin", "octogent");
+
+    console.log("Initializing a fresh workspace with the packaged CLI...");
+    runChecked(octogentBin, ["init", "octogent-smoke"], {
+      cwd: workspaceDir,
+      env: runtimeEnv,
+    });
+
+    console.log("Launching packaged Octogent in the initialized workspace...");
 
     let stdout = "";
     let stderr = "";

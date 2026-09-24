@@ -10,6 +10,9 @@ export type ClaudeUsageSnapshot = {
   secondaryResetAt?: string | null;
   sonnetUsedPercent?: number | null;
   sonnetResetAt?: string | null;
+  scopedUsedPercent?: number | null;
+  scopedResetAt?: string | null;
+  scopedLabel?: string | null;
   extraUsageCostUsed?: number | null;
   extraUsageCostLimit?: number | null;
 };
@@ -26,6 +29,8 @@ export type CodexUsageSnapshot = {
   secondaryResetAt?: string | null;
   creditsBalance?: number | null;
   creditsUnlimited?: boolean | null;
+  /** The account-level flag Codex sets once a rate-limit window is spent. */
+  limitReached?: boolean | null;
 };
 
 export type GitHubCommitPoint = {

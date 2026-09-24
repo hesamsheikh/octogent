@@ -7,13 +7,21 @@ import type {
   TentaclePullRequestSnapshot,
   TentacleWorkspaceMode,
   TerminalAgentProvider,
+  TerminalCompletionSummary,
   TerminalLifecycleState,
+  TerminalProviderError,
 } from "@octogent/core";
-import { isTerminalAgentProvider, isTerminalCompletionSoundId } from "@octogent/core";
+import {
+  isTerminalAgentProvider,
+  isTerminalCompletionSoundId,
+  isTerminalProviderErrorKind,
+} from "@octogent/core";
 import type { IPty } from "node-pty";
 import type { WebSocket } from "ws";
 
 import type { AgentRuntimeState, AgentStateTracker } from "../agentStateDetection";
+import type { CodexRateLimitPromptScanner } from "./codexRateLimitPrompt";
+import type { ProviderErrorScanner } from "./providerErrors";
 
 export type TerminalStateMessage = {
   type: "state";
@@ -56,7 +64,12 @@ export type Disposable = {
 export type TerminalSession = {
   terminalId: string;
   tentacleId: string;
-  pty: IPty;
+  // Reliability fix: set to null after teardown so the only remaining
+  // reference to the IPty drops and GC can release the underlying master
+  // FD. Without this, accumulated PTY allocations exhaust
+  // `kern.tty.ptmx_max` (default 511 on macOS) within ~10-20 minutes
+  // of normal usage. Reads must guard with `if (!session.isClosed)` first.
+  pty: IPty | null;
   ptyDisposables?: Disposable[];
   clients: Set<WebSocket>;
   directListeners: Set<DirectSessionListener>;
@@ -77,12 +90,21 @@ export type TerminalSession = {
   hasTranscriptEnded?: boolean;
   initialPrompt?: string;
   isInitialPromptSent?: boolean;
+  initialPromptSentAt?: number;
+  hasSessionStartHook?: boolean;
+  /** Some Octogent hook reached this session, so a missing acknowledgement means lost input. */
+  hasSeenHook?: boolean;
+  isInitialPromptAcknowledged?: boolean;
+  hasRetriedInitialPrompt?: boolean;
   initialInputDraft?: string;
   isInitialInputDraftSent?: boolean;
   keepAliveWithoutClients?: boolean;
   isClosed?: boolean;
   hasSeenProcessing?: boolean;
+  lastOutputActivityAt?: number;
   lastToolName?: string | undefined;
+  providerErrorScanner?: ProviderErrorScanner;
+  codexRateLimitPromptScanner?: CodexRateLimitPromptScanner;
 };
 
 export type TerminalNameOrigin = "generated" | "user" | "prompt";
@@ -95,8 +117,10 @@ export {
   type TentacleWorkspaceMode,
   type TerminalAgentProvider,
   type TerminalLifecycleState,
+  type TerminalProviderError,
   isTerminalAgentProvider,
   isTerminalCompletionSoundId,
+  isTerminalProviderErrorKind,
 };
 
 export type TerminalSessionStartDetails = {
@@ -127,18 +151,37 @@ export type PersistedTerminal = {
   createdAt: string;
   workspaceMode: TentacleWorkspaceMode;
   agentProvider?: TerminalAgentProvider;
+  agentModel?: string;
+  agentReasoningEffort?: string;
+  agentEffortTier?: string;
+  /** Model the agent actually reported in its transcript (Claude), when none was requested. */
+  agentModelObserved?: string;
+  /** In-memory only: activity flipped a completed/awaiting-review verdict back to running. */
+  verdictFlippedBack?: boolean | undefined;
+  attentionSince?: string | undefined;
+  attentionKind?: "permission" | "user" | undefined;
+  attentionToolName?: string | undefined;
+  providerError?: TerminalProviderError | undefined;
   initialPrompt?: string;
   initialInputDraft?: string;
   lastActiveAt?: string;
   parentTerminalId?: string;
+  /**
+   * Names the creating caller passed along with `inheritEnv`. The values stay
+   * in the server's memory only, so this record never holds a caller's secrets.
+   */
+  inheritedEnv?: string[];
   lifecycleState?: TerminalLifecycleState | undefined;
   lifecycleReason?: string | undefined;
+  completedAt?: string | undefined;
+  completionSummary?: TerminalCompletionSummary | undefined;
   lifecycleUpdatedAt?: string | undefined;
   processId?: number | undefined;
   startedAt?: string | undefined;
   endedAt?: string | undefined;
   exitCode?: number | undefined;
   exitSignal?: number | string | undefined;
+  archivedAt?: string | undefined;
 };
 
 export type GitClientPullRequestSnapshot = Omit<
@@ -184,10 +227,20 @@ export type GitClient = {
 
 export class RuntimeInputError extends Error {}
 
+/** A new session would exceed a concurrency cap shared beyond this request; answered as 429. */
+export class SessionLimitError extends RuntimeInputError {}
+
 export type CreateTerminalRuntimeOptions = {
   workspaceCwd: string;
   projectStateDir?: string | undefined;
   gitClient?: GitClient;
   getApiBaseUrl?: () => string;
   maxConcurrentSessions?: number | undefined;
+  /** Hub registry id, exported to sessions as OCTOGENT_PROJECT_ID. */
+  projectId?: string | undefined;
+  /**
+   * Consulted before any new PTY session starts, after the per-project limit:
+   * the hub's cap across all projects. Returns the refusal message, or null.
+   */
+  checkSessionAdmission?: (() => string | null) | undefined;
 };

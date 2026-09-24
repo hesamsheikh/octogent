@@ -29,6 +29,10 @@ The API process owns the moving parts that cannot live in markdown:
 - Deck file operations over `.octogent/tentacles/`
 - UI state persistence
 
+## Hub: one process, many projects
+
+A hub runs one API process for every registered project instead of one server per project. Each project gets its own context (terminal runtime, monitor, code-intel store, prompts, usage cache), created on the first request that names it and mounted under `/api/p/<key>/`; the Host, Origin, and token checks run once at the hub before a request reaches a project. A project's agents are given an API base scoped to it, `<hub>/api/p/<projectId>`, in their Claude hook commands, the guarded user-level Codex hooks, and `OCTOGENT_API_BASE`, so a hook or the in-worker CLI always lands in the project that owns the session even though terminal ids repeat across projects. A single-project server is the same code with one context mounted at the root and an unprefixed base. A hub writes a single server log, `~/.octogent/hub/logs/server.log`, with each project's lines tagged `[<slug>]`. `octogent hub start` runs it, and any CLI command that needs a server starts it on demand; see [Run the hub](../reference/cli.md#run-the-hub).
+
 ## Transport model
 
 - HTTP handles CRUD, snapshots, prompt resolution, setup checks, and file-backed operations

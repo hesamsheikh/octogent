@@ -22,6 +22,8 @@ octogent
 
 Octogent is not published to npm yet, so `npm install -g octogent` is not currently a valid quick start path.
 
+Run `octogent` in a project directory (a git repository). It starts the hub if none is running, registers the project, and opens its page at `http://127.0.0.1:8787/p/<slug>/`; `http://127.0.0.1:8787/` lists every project. The hub keeps running in the background. See [Running Octogent through the hub](../guides/hub.md), and `octogent --standalone` for a server of the project's own.
+
 On a fresh workspace, Octogent opens the Deck setup flow first. The setup card verifies the
 workspace files, `.gitignore`, and local prerequisites before you create tentacles.
 

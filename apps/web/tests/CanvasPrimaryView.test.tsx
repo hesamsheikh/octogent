@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CanvasPrimaryView } from "../src/components/CanvasPrimaryView";
+import { renderWithLocale } from "./test-utils/renderWithLocale";
 
 type MockCanvasNode = {
   id: string;
@@ -129,21 +130,16 @@ vi.mock("../src/components/canvas/CanvasTerminalColumn", () => ({
   CanvasTerminalColumn: ({
     node,
     panelRef,
-    onMinimize,
     onClose,
   }: {
     node: (typeof nodes)[number];
     panelRef?: ((element: HTMLElement | null) => void) | undefined;
-    onMinimize?: () => void;
     onClose?: () => void;
   }) => (
     <section ref={panelRef} data-testid={`panel-${node.id}`} tabIndex={-1}>
       panel {node.id} label {node.label}
-      <button type="button" onClick={onMinimize}>
-        Minimize terminal panel
-      </button>
       <button type="button" onClick={onClose}>
-        Close terminal session
+        Close terminal panel
       </button>
     </section>
   ),
@@ -181,7 +177,7 @@ describe("CanvasPrimaryView", () => {
   });
 
   it("reveals and focuses a newly opened terminal panel when a session node is clicked", async () => {
-    render(<CanvasPrimaryView columns={[]} isUiStateHydrated />);
+    renderWithLocale(<CanvasPrimaryView columns={[]} isUiStateHydrated />);
 
     const [terminalButton] = screen.getAllByRole("button", { name: "terminal-1" });
     expect(terminalButton).toBeDefined();
@@ -196,9 +192,8 @@ describe("CanvasPrimaryView", () => {
     });
   });
 
-  it("minimizes a terminal panel separately from closing the terminal session", async () => {
-    const onCloseActiveSession = vi.fn();
-    render(
+  it("collapses a terminal panel without ending the agent behind it", async () => {
+    renderWithLocale(
       <CanvasPrimaryView
         columns={[
           {
@@ -212,7 +207,6 @@ describe("CanvasPrimaryView", () => {
           },
         ]}
         isUiStateHydrated
-        onCloseActiveSession={onCloseActiveSession}
       />,
     );
 
@@ -225,21 +219,56 @@ describe("CanvasPrimaryView", () => {
       expect(screen.getByTestId("panel-a:terminal-1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Minimize terminal panel" }));
+    // The panel control hides the window only: an operator watching several
+    // agents must be able to put one away without destroying its worktree.
+    fireEvent.click(screen.getByRole("button", { name: "Close terminal panel" }));
     expect(screen.queryByTestId("panel-a:terminal-1")).not.toBeInTheDocument();
-    expect(onCloseActiveSession).not.toHaveBeenCalled();
 
+    // Same toggle as the tentacle nodes: clicking the node brings it back.
     fireEvent.click(terminalButton);
     await waitFor(() => {
       expect(screen.getByTestId("panel-a:terminal-1")).toBeInTheDocument();
     });
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Close terminal session" }));
-    expect(onCloseActiveSession).toHaveBeenCalledWith("terminal-1", "terminal one", "shared");
+  it("keeps a panel closed after the operator collapses a restored one", async () => {
+    renderWithLocale(
+      <CanvasPrimaryView
+        columns={[
+          {
+            terminalId: "terminal-1",
+            label: "terminal-1",
+            state: "live",
+            tentacleId: "tentacle-a",
+            tentacleName: "terminal one",
+            workspaceMode: "shared",
+            createdAt: "2026-02-24T10:00:00.000Z",
+          },
+        ]}
+        isUiStateHydrated
+        canvasOpenTerminalIds={["a:terminal-1"]}
+      />,
+    );
+
+    // The panel comes back from persisted ui state on load, behind a settling timer.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("panel-a:terminal-1")).toBeInTheDocument();
+      },
+      { timeout: 4000 },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Close terminal panel" }));
+
+    // Restoring must not fight the operator: the persisted id list still names
+    // this panel, so a re-running restore would reopen what was just closed.
+    expect(screen.queryByTestId("panel-a:terminal-1")).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("panel-a:terminal-1")).not.toBeInTheDocument();
   });
 
   it("auto-opens a newly created child terminal when its parent panel is already open", async () => {
-    const { rerender } = render(
+    const { rerender } = renderWithLocale(
       <CanvasPrimaryView
         columns={[
           {
@@ -324,7 +353,7 @@ describe("CanvasPrimaryView", () => {
   });
 
   it("updates an open terminal panel label when the terminal is renamed", async () => {
-    const { rerender } = render(
+    const { rerender } = renderWithLocale(
       <CanvasPrimaryView
         columns={[
           {
@@ -378,7 +407,7 @@ describe("CanvasPrimaryView", () => {
   it("shows tentacle maintenance actions in the context menu and passes the tentacle ID", async () => {
     const onTentacleAction = vi.fn().mockResolvedValue(undefined);
 
-    const { container } = render(
+    const { container } = renderWithLocale(
       <CanvasPrimaryView columns={[]} isUiStateHydrated onTentacleAction={onTentacleAction} />,
     );
 

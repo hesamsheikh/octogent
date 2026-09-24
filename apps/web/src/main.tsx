@@ -1,7 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { App } from "./App";
+import { resolvePageMode } from "./app/hub/pageMode";
+import { PageRoot } from "./components/PageRoot";
 import "./styles.css";
 
 const rootElement = document.getElementById("root");
@@ -12,6 +13,6 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <PageRoot mode={resolvePageMode(window.location.pathname)} />
   </StrictMode>,
 );

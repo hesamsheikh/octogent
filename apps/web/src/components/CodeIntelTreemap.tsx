@@ -6,6 +6,7 @@ import {
   heatColor,
   layoutTreemap,
 } from "../app/codeIntelAggregation";
+import { useT } from "../app/providers/LocaleProvider";
 
 type CodeIntelTreemapProps = {
   root: TreemapNode;
@@ -16,6 +17,7 @@ const MIN_LABEL_WIDTH = 48;
 const MIN_LABEL_HEIGHT = 18;
 
 export const CodeIntelTreemap = ({ root }: CodeIntelTreemapProps) => {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 600, height: 400 });
   const [hoveredRect, setHoveredRect] = useState<TreemapRect | null>(null);
@@ -63,7 +65,7 @@ export const CodeIntelTreemap = ({ root }: CodeIntelTreemapProps) => {
         width={size.width}
         height={size.height}
         role="img"
-        aria-label="File edit frequency treemap"
+        aria-label={t("web.a11y.fileEditFrequencyTreemap")}
       >
         {rects.map((r) => {
           const gapX = GAP;

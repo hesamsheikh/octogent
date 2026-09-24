@@ -1,0 +1,36 @@
+# The unit `octogent hub install-service` writes, for installing by hand.
+# Copy it to ~/.config/systemd/user/octogent-hub.service, replace the
+# placeholders, then: systemctl --user daemon-reload &&
+# systemctl --user enable --now octogent-hub.service
+# See docs/reference/systemd.md.
+
+[Unit]
+Description=Octogent hub
+# Stop retrying after 5 failed starts in 2 minutes (a port that stays taken).
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# The launcher in your Octogent checkout (`<checkout>/bin/octogent`); systemd
+# does not read your shell profile, so it must be an absolute path.
+ExecStart=/absolute/path/to/octogent/bin/octogent hub start --foreground
+WorkingDirectory=%h
+
+# The launcher is a `#!/usr/bin/env node` script and the hub's agents need
+# claude, codex, and git: put their directories here (`echo $PATH` in your shell).
+Environment="PATH=/absolute/path/to/node/bin:/usr/local/bin:/usr/bin:/bin"
+
+# The state root the hub serves, spelled out (no %h): the CLI looks for this
+# exact line to know that starting the hub means `systemctl --user start`.
+Environment="OCTOGENT_HOME=/home/you/.octogent"
+
+# KEY=value lines such as OCTOGENT_HUB_PORT, OCTOGENT_ALLOW_REMOTE_ACCESS, or
+# OCTOGENT_ACCESS_TOKEN; the leading "-" makes the file optional.
+EnvironmentFile=-%h/.octogent/hub.env
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

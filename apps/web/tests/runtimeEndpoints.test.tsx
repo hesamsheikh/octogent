@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildClaudeUsageUrl,
+  buildCodeIntelEventsUrl,
   buildCodexUsageUrl,
   buildConversationExportUrl,
   buildConversationSessionUrl,
   buildConversationsUrl,
+  buildDeckTentacleSwarmUrl,
   buildGithubSummaryUrl,
+  buildHubProjectsUrl,
   buildMonitorConfigUrl,
   buildMonitorFeedUrl,
   buildMonitorRefreshUrl,
@@ -20,10 +23,12 @@ import {
   buildTerminalEventsSocketUrl,
   buildTerminalSnapshotsUrl,
   buildTerminalSocketUrl,
+  buildTerminalUrl,
   buildTerminalsUrl,
   buildUiStateUrl,
   buildWorkspaceSetupStepUrl,
   buildWorkspaceSetupUrl,
+  resolveApiPrefix,
 } from "../src/runtime/runtimeEndpoints";
 
 describe("runtimeEndpoints", () => {
@@ -236,5 +241,104 @@ describe("runtimeEndpoints", () => {
         new URL("https://workspace.example.com/dashboard") as unknown as Location,
       ),
     ).toBe("ws://127.0.0.1:8787/api/terminal-events/ws");
+  });
+
+  it("builds single-terminal, swarm and code-intel URLs", () => {
+    expect(buildTerminalUrl("terminal 1")).toBe("/api/terminals/terminal%201");
+    expect(buildTerminalUrl("terminal-1", "https://runtime.example.com")).toBe(
+      "https://runtime.example.com/api/terminals/terminal-1",
+    );
+    expect(buildDeckTentacleSwarmUrl("tentacle-main")).toBe(
+      "/api/deck/tentacles/tentacle-main/swarm",
+    );
+    expect(buildCodeIntelEventsUrl()).toBe("/api/code-intel/events");
+  });
+
+  it("builds the hub project listing URL", () => {
+    expect(buildHubProjectsUrl()).toBe("/api/projects");
+  });
+});
+
+describe("resolveApiPrefix", () => {
+  it("maps a project page to that project's hub mount", () => {
+    expect(resolveApiPrefix("/p/keycluster/")).toBe("/api/p/keycluster");
+    expect(resolveApiPrefix("/p/abc-123/deck")).toBe("/api/p/abc-123");
+    expect(resolveApiPrefix("/p/my%20app/")).toBe("/api/p/my%20app");
+  });
+
+  it("adds no prefix outside a project page", () => {
+    expect(resolveApiPrefix("/")).toBe("");
+    expect(resolveApiPrefix("/index.html")).toBe("");
+    expect(resolveApiPrefix("/dashboard")).toBe("");
+  });
+});
+
+describe("runtimeEndpoints on a hub project page", () => {
+  const socketLocation = new URL("https://hub.example.com/p/keycluster/") as unknown as Location;
+
+  // The prefix is read once when the module loads, so each page gets a fresh module.
+  const loadEndpointsAt = async (pathname: string) => {
+    window.history.replaceState(null, "", pathname);
+    vi.resetModules();
+    return await import("../src/runtime/runtimeEndpoints");
+  };
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("prefixes HTTP URLs with the project mount from /p/<key>/", async () => {
+    const endpoints = await loadEndpointsAt("/p/keycluster/");
+    expect(endpoints.buildTerminalSnapshotsUrl()).toBe("/api/p/keycluster/api/terminal-snapshots");
+    expect(endpoints.buildUiStateUrl()).toBe("/api/p/keycluster/api/ui-state");
+    expect(endpoints.buildTerminalUrl("terminal-1")).toBe(
+      "/api/p/keycluster/api/terminals/terminal-1",
+    );
+  });
+
+  it("derives the prefix from a deeper project path", async () => {
+    const endpoints = await loadEndpointsAt("/p/abc-123/deck");
+    expect(endpoints.buildDeckTentaclesUrl()).toBe("/api/p/abc-123/api/deck/tentacles");
+    expect(endpoints.buildUsageHeatmapUrl("project")).toBe(
+      "/api/p/abc-123/api/analytics/usage-heatmap?scope=project",
+    );
+  });
+
+  it("ignores the ?token= a LAN sign-in link appends", async () => {
+    const endpoints = await loadEndpointsAt("/p/keycluster/?token=secret-token");
+    expect(endpoints.buildTerminalsUrl()).toBe("/api/p/keycluster/api/terminals");
+  });
+
+  it("leaves root-page URLs unprefixed", async () => {
+    const endpoints = await loadEndpointsAt("/");
+    expect(endpoints.buildTerminalsUrl()).toBe("/api/terminals");
+  });
+
+  it("prefixes WebSocket URLs", async () => {
+    const endpoints = await loadEndpointsAt("/p/keycluster/");
+    expect(endpoints.buildTerminalSocketUrl("terminal-1", undefined, socketLocation)).toBe(
+      "wss://hub.example.com/api/p/keycluster/api/terminals/terminal-1/ws",
+    );
+    expect(endpoints.buildTerminalEventsSocketUrl(undefined, socketLocation)).toBe(
+      "wss://hub.example.com/api/p/keycluster/api/terminal-events/ws",
+    );
+  });
+
+  it("keeps hub-level URLs off the project mount", async () => {
+    const endpoints = await loadEndpointsAt("/p/keycluster/");
+    expect(endpoints.buildHubProjectsUrl()).toBe("/api/projects");
+    expect(endpoints.buildHubProjectsUrl("http://127.0.0.1:8787")).toBe(
+      "http://127.0.0.1:8787/api/projects",
+    );
+  });
+
+  it("applies the prefix after a configured runtime origin", async () => {
+    const endpoints = await loadEndpointsAt("/p/keycluster/");
+    expect(endpoints.buildTerminalsUrl("http://127.0.0.1:8787")).toBe(
+      "http://127.0.0.1:8787/api/p/keycluster/api/terminals",
+    );
+    expect(
+      endpoints.buildTerminalSocketUrl("terminal-1", "http://127.0.0.1:8787", socketLocation),
+    ).toBe("ws://127.0.0.1:8787/api/p/keycluster/api/terminals/terminal-1/ws");
   });
 });

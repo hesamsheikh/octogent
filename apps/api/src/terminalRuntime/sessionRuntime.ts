@@ -1,4 +1,13 @@
-import { type WriteStream, createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  type WriteStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
@@ -7,9 +16,23 @@ import { type IPty, spawn } from "node-pty";
 import type { WebSocket, WebSocketServer } from "ws";
 
 import { type AgentRuntimeState, AgentStateTracker } from "../agentStateDetection";
+import { logVerbose } from "../logging";
+import { resolveBootstrapCommand } from "./bootstrapCommand";
 import {
+  CODEX_RATE_LIMIT_PROMPT_ANSWERS,
+  type CodexRateLimitPrompt,
+  createCodexRateLimitPromptScanner,
+  resolveCodexRateLimitPromptPolicy,
+} from "./codexRateLimitPrompt";
+import {
+  AGENT_INJECT_ACK_TIMEOUT_MS,
+  AGENT_INJECT_SUBMIT_DELAY_MS,
+  AGENT_PASTE_END,
+  AGENT_PASTE_START,
   DEFAULT_AGENT_PROVIDER,
   TERMINAL_BOOTSTRAP_COMMANDS,
+  TERMINAL_DEFAULT_COLS,
+  TERMINAL_DEFAULT_ROWS,
   TERMINAL_MAX_CONCURRENT_SESSIONS,
   TERMINAL_SCROLLBACK_MAX_BYTES,
   TERMINAL_SESSION_IDLE_GRACE_MS,
@@ -22,8 +45,16 @@ import {
   transcriptFilenameForSession,
 } from "./conversations";
 import { broadcastMessage, getTerminalId, sendMessage } from "./protocol";
+import {
+  type ProviderErrorMatch,
+  createProviderErrorScanner,
+  recordProviderError,
+} from "./providerErrors";
 import { createShellEnvironment, ensureNodePtySpawnHelperExecutable } from "./ptyEnvironment";
+import { renderScreen } from "./screenRender";
+import { screenTail } from "./screenText";
 import { toErrorMessage } from "./systemClients";
+import { parseTerminalInput } from "./terminalInput";
 import type {
   DirectSessionListener,
   PersistedTerminal,
@@ -36,23 +67,34 @@ type CreateSessionRuntimeOptions = {
   websocketServer: WebSocketServer;
   terminals: Map<string, PersistedTerminal>;
   sessions: Map<string, TerminalSession>;
+  workspaceCwd?: string;
   resolveTerminalSession?: (terminalId: string) => {
     sessionId: string;
     tentacleId: string;
   } | null;
   getTentacleWorkspaceCwd: (tentacleId: string) => string;
+  /** Values for the terminal's `inheritEnv` names; memory only, so empty after a restart. */
+  getInheritedEnv?: (terminalId: string) => Record<string, string> | undefined;
+  getApiBaseUrl?: () => string;
   isDebugPtyLogsEnabled: boolean;
   ptyLogDir: string;
   transcriptDirectoryPath: string;
   sessionIdleGraceMs?: number;
   scrollbackMaxBytes?: number;
   maxConcurrentSessions?: number;
+  projectId?: string;
+  checkSessionAdmission?: () => string | null;
   onStateChange?: (terminalId: string, state: AgentRuntimeState, toolName?: string) => void;
+  /** PTY output heartbeat, throttled; the runtime uses it to keep lastActiveAt honest during long turns. */
+  onOutputActivity?: (terminalId: string) => void;
   onSessionStart?: (terminalId: string, details: TerminalSessionStartDetails) => void;
   onSessionEnd?: (terminalId: string, details: TerminalSessionEndDetails) => void;
+  onTerminalUpdated?: (terminalId: string) => void;
 };
 
 const ANSI_BEL = String.fromCharCode(0x07);
+// A spinner redraws many times a second; one activity tick per few seconds is plenty.
+const OUTPUT_ACTIVITY_THROTTLE_MS = 5_000;
 const ANSI_ESCAPE = String.fromCharCode(0x1b);
 const BROKEN_OSC_TAIL_RE = new RegExp(
   `^\\][^${ANSI_BEL}${ANSI_ESCAPE}]*(?:${ANSI_BEL}|${ANSI_ESCAPE}\\\\)`,
@@ -62,20 +104,25 @@ export const createSessionRuntime = ({
   websocketServer,
   terminals,
   sessions,
+  workspaceCwd,
   resolveTerminalSession,
   getTentacleWorkspaceCwd,
+  getInheritedEnv,
+  getApiBaseUrl,
   isDebugPtyLogsEnabled,
   ptyLogDir,
   transcriptDirectoryPath,
   sessionIdleGraceMs = TERMINAL_SESSION_IDLE_GRACE_MS,
   scrollbackMaxBytes = TERMINAL_SCROLLBACK_MAX_BYTES,
   maxConcurrentSessions = TERMINAL_MAX_CONCURRENT_SESSIONS,
+  projectId,
+  checkSessionAdmission,
   onStateChange,
+  onOutputActivity,
   onSessionStart,
   onSessionEnd,
+  onTerminalUpdated,
 }: CreateSessionRuntimeOptions) => {
-  const DEFAULT_PTY_COLS = 120;
-  const DEFAULT_PTY_ROWS = 35;
   const sessionLimit = Number.isFinite(maxConcurrentSessions)
     ? Math.max(1, Math.floor(maxConcurrentSessions))
     : TERMINAL_MAX_CONCURRENT_SESSIONS;
@@ -238,6 +285,10 @@ export const createSessionRuntime = ({
 
       callback();
     }, delayMs);
+    // Everything here serves a live session; none of it should hold the process open.
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
 
     if (!session.promptTimers) {
       session.promptTimers = new Set();
@@ -323,6 +374,7 @@ export const createSessionRuntime = ({
       return;
     }
 
+    saveLastScreen(sessionId, session);
     session.isClosed = true;
     clearIdleCloseTimer(session);
     clearPromptTimers(session);
@@ -357,7 +409,7 @@ export const createSessionRuntime = ({
 
     if (options.killPty) {
       try {
-        session.pty.kill(options.killSignal);
+        session.pty?.kill(options.killSignal);
       } catch {
         // Ignore teardown errors; session will still be discarded.
       }
@@ -376,6 +428,23 @@ export const createSessionRuntime = ({
     if (sessions.get(sessionId) === session) {
       sessions.delete(sessionId);
     }
+
+    // Reliability fix: drop the heavy references that hold the IPty's
+    // master FD alive. The disposables above remove our listeners, but
+    // the IPty object itself is held by `session.pty` (and indirectly
+    // by the data/exit closure scopes that captured `session`). Null
+    // them out explicitly so the next GC pass can release the FD —
+    // otherwise PTY allocations accumulate until `kern.tty.ptmx_max`
+    // is exhausted (default 511 on macOS, ~10-20 min of usage).
+    //
+    // This runs on a `setImmediate` boundary so any in-flight node-pty
+    // callbacks (the exit handler especially) finish first.
+    setImmediate(() => {
+      session.pty = null;
+      session.scrollbackChunks = [];
+      session.scrollbackBytes = 0;
+      session.transcriptLog = undefined;
+    });
   };
 
   const closeSession = (sessionId: string): boolean => {
@@ -437,9 +506,177 @@ export const createSessionRuntime = ({
   };
 
   const INITIAL_PROMPT_DELAY_MS = 4_000;
-  const INITIAL_PROMPT_SUBMIT_DELAY_MS = 150;
-  const BRACKETED_PASTE_START = "\x1b[200~";
-  const BRACKETED_PASTE_END = "\x1b[201~";
+  const INITIAL_PROMPT_FALLBACK_MS = 15_000;
+  const INITIAL_PROMPT_ACK_TIMEOUT_MS = AGENT_INJECT_ACK_TIMEOUT_MS;
+  const INITIAL_PROMPT_UNACKNOWLEDGED_REASON = "initial prompt not acknowledged";
+  const INITIAL_PROMPT_SUBMIT_DELAY_MS = AGENT_INJECT_SUBMIT_DELAY_MS;
+  const BRACKETED_PASTE_START = AGENT_PASTE_START;
+  const BRACKETED_PASTE_END = AGENT_PASTE_END;
+
+  const scheduleInitialPromptVerification = (sessionId: string, session: TerminalSession) => {
+    // Without SessionStart, missing acknowledgements may just mean disabled
+    // hooks. Retrying those agents could submit the same task twice.
+    if (
+      !session.hasSessionStartHook ||
+      session.isInitialPromptAcknowledged ||
+      session.initialPromptSentAt === undefined
+    ) {
+      return;
+    }
+
+    schedulePromptTimer(
+      session,
+      sessionId,
+      () => {
+        if (session.isInitialPromptAcknowledged) {
+          return;
+        }
+        if (!session.hasRetriedInitialPrompt) {
+          session.hasRetriedInitialPrompt = true;
+          logVerbose(`[Session] initial-prompt retry session=${sessionId}: no acknowledgement`);
+          writeInitialPrompt(sessionId, session);
+          return;
+        }
+
+        logVerbose(`[Session] initial-prompt not acknowledged after retry session=${sessionId}`);
+        const terminal = terminals.get(session.terminalId);
+        if (terminal?.lifecycleState === "running") {
+          terminal.lifecycleReason = INITIAL_PROMPT_UNACKNOWLEDGED_REASON;
+          terminal.lifecycleUpdatedAt = new Date().toISOString();
+          onTerminalUpdated?.(session.terminalId);
+        }
+      },
+      Math.max(0, session.initialPromptSentAt + INITIAL_PROMPT_ACK_TIMEOUT_MS - Date.now()),
+    );
+  };
+
+  const writeInitialPrompt = (sessionId: string, session: TerminalSession) => {
+    if (!session.initialPrompt || session.isClosed || !session.pty) {
+      return;
+    }
+
+    session.isInitialPromptSent = true;
+    session.initialPromptSentAt = Date.now();
+    appendDebugLog(session, `initial-prompt session=${sessionId}`);
+    session.pty.write(`${BRACKETED_PASTE_START}${session.initialPrompt}${BRACKETED_PASTE_END}`);
+    schedulePromptTimer(
+      session,
+      sessionId,
+      () => {
+        appendDebugLog(session, `initial-prompt-submit session=${sessionId}`);
+        session.pty?.write("\r");
+      },
+      INITIAL_PROMPT_SUBMIT_DELAY_MS,
+    );
+    scheduleInitialPromptVerification(sessionId, session);
+  };
+
+  const sendInitialPromptNow = (sessionId: string) => {
+    const session = sessions.get(sessionId);
+    if (!session || session.isClosed || !session.isBootstrapCommandSent) {
+      return;
+    }
+
+    const hadSessionStartHook = session.hasSessionStartHook;
+    session.hasSessionStartHook = true;
+    if (!session.isInitialPromptSent) {
+      writeInitialPrompt(sessionId, session);
+    } else if (!hadSessionStartHook) {
+      // A slow startup may signal readiness after the fallback already sent.
+      // Verify that attempt without restarting its acknowledgement deadline.
+      scheduleInitialPromptVerification(sessionId, session);
+    }
+  };
+
+  /** True when this prompt submit was the initial prompt's, so nothing else may claim it. */
+  const acknowledgeInitialPrompt = (sessionId: string): boolean => {
+    const session = sessions.get(sessionId);
+    if (
+      !session ||
+      session.isClosed ||
+      !session.isInitialPromptSent ||
+      session.isInitialPromptAcknowledged
+    ) {
+      return false;
+    }
+
+    session.isInitialPromptAcknowledged = true;
+    const terminal = terminals.get(session.terminalId);
+    if (terminal?.lifecycleReason === INITIAL_PROMPT_UNACKNOWLEDGED_REASON) {
+      terminal.lifecycleReason = undefined;
+      terminal.lifecycleUpdatedAt = new Date().toISOString();
+      onTerminalUpdated?.(session.terminalId);
+    }
+    return true;
+  };
+
+  // Lets other runtime parts time work against a session: the timer dies with
+  // it, and never fires into a replacement session for the same terminal.
+  const scheduleSessionTimer = (
+    sessionId: string,
+    callback: () => void,
+    delayMs: number,
+  ): boolean => {
+    const session = sessions.get(sessionId);
+    if (!session || session.isClosed) {
+      return false;
+    }
+
+    schedulePromptTimer(session, sessionId, callback, delayMs);
+    return true;
+  };
+
+  // Codex's "switch to a cheaper model?" prompt reports through no hook and
+  // swallows whatever is pasted next. By default the worker keeps the model
+  // its operator chose; "ask" parks it as waiting-for-user so `terminal wait`
+  // exits 3 and a person decides.
+  const CODEX_RATE_LIMIT_PROMPT_RESCAN_MS = 3_000;
+  const handleCodexRateLimitPrompt = (
+    sessionId: string,
+    session: TerminalSession,
+    prompt: CodexRateLimitPrompt,
+  ) => {
+    const policy = resolveCodexRateLimitPromptPolicy(process.env.OCTOGENT_CODEX_RATE_LIMIT_PROMPT);
+    logVerbose(
+      `[Session] codex rate-limit prompt session=${sessionId} suggested=${prompt.suggestedModel} policy=${policy}`,
+    );
+    if (policy === "ask") {
+      session.lastToolName = "codex rate-limit prompt";
+      session.agentState = "waiting_for_user";
+      session.stateTracker.forceState("waiting_for_user");
+      onStateChange?.(sessionId, "waiting_for_user", session.lastToolName);
+      broadcastMessage(session, { type: "state", state: "waiting_for_user" });
+      return;
+    }
+    session.pty?.write(CODEX_RATE_LIMIT_PROMPT_ANSWERS[policy]);
+    appendTranscriptEvent(session, sessionId, {
+      type: "input_submit",
+      submitId: randomUUID(),
+      text: `[auto] codex rate-limit prompt: ${policy} (suggested ${prompt.suggestedModel})`,
+      timestamp: new Date().toISOString(),
+    });
+    // The answered prompt is still in the tail until Codex repaints; look
+    // again only once it has had time to go away.
+    schedulePromptTimer(
+      session,
+      sessionId,
+      () => session.codexRateLimitPromptScanner?.reset(),
+      CODEX_RATE_LIMIT_PROMPT_RESCAN_MS,
+    );
+  };
+
+  // Identical repaints are dropped by recordProviderError, so only a new
+  // banner reaches the registry and the UI.
+  const noteProviderError = (session: TerminalSession, match: ProviderErrorMatch) => {
+    const terminal = terminals.get(session.terminalId);
+    if (!terminal || !recordProviderError(terminal, match, new Date().toISOString())) {
+      return;
+    }
+    logVerbose(
+      `[Session] provider error session=${session.terminalId} kind=${match.kind}: ${match.message}`,
+    );
+    onTerminalUpdated?.(session.terminalId);
+  };
 
   const scheduleIdleCloseIfNeeded = (session: TerminalSession, sessionId: string) => {
     if (session.isClosed || sessions.get(sessionId) !== session) {
@@ -473,13 +710,25 @@ export const createSessionRuntime = ({
     session.isBootstrapCommandSent = true;
     const terminal = terminals.get(session.terminalId);
     const provider = terminal?.agentProvider ?? DEFAULT_AGENT_PROVIDER;
+    const tentaclesDirectory = workspaceCwd
+      ? join(workspaceCwd, ".octogent", "tentacles")
+      : undefined;
 
-    const bootstrapCommand =
-      TERMINAL_BOOTSTRAP_COMMANDS[provider] ?? TERMINAL_BOOTSTRAP_COMMANDS[DEFAULT_AGENT_PROVIDER];
+    const bootstrapCommand = resolveBootstrapCommand(provider, process.env, {
+      ...(terminal?.workspaceMode ? { workspaceMode: terminal.workspaceMode } : {}),
+      ...(terminal?.agentModel ? { agentModel: terminal.agentModel } : {}),
+      ...(terminal?.agentReasoningEffort
+        ? { codexReasoningEffort: terminal.agentReasoningEffort }
+        : {}),
+      ...(tentaclesDirectory && existsSync(tentaclesDirectory)
+        ? { claudeAdditionalDirs: [tentaclesDirectory] }
+        : {}),
+    });
     appendDebugLog(session, `bootstrap session=${sessionId} command=${bootstrapCommand}`);
-    session.pty.write(`${bootstrapCommand}\r`);
+    session.pty?.write(`${bootstrapCommand}\r`);
 
-    // Schedule initial prompt injection after Claude Code has had time to boot.
+    // SessionStart sends as soon as the agent is ready; agents without hooks
+    // still get a best-effort attempt after a longer startup window.
     if (session.initialPrompt && !session.isInitialPromptSent) {
       schedulePromptTimer(
         session,
@@ -488,21 +737,9 @@ export const createSessionRuntime = ({
           if (session.isInitialPromptSent) {
             return;
           }
-          session.isInitialPromptSent = true;
-          appendDebugLog(session, `initial-prompt session=${sessionId}`);
-          const prompt = session.initialPrompt ?? "";
-          session.pty.write(`${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`);
-          schedulePromptTimer(
-            session,
-            sessionId,
-            () => {
-              appendDebugLog(session, `initial-prompt-submit session=${sessionId}`);
-              session.pty.write("\r");
-            },
-            INITIAL_PROMPT_SUBMIT_DELAY_MS,
-          );
+          writeInitialPrompt(sessionId, session);
         },
-        INITIAL_PROMPT_DELAY_MS,
+        INITIAL_PROMPT_FALLBACK_MS,
       );
     }
 
@@ -517,7 +754,7 @@ export const createSessionRuntime = ({
           session.isInitialInputDraftSent = true;
           appendDebugLog(session, `initial-input-draft session=${sessionId}`);
           const draft = session.initialInputDraft ?? "";
-          session.pty.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
+          session.pty?.write(`${BRACKETED_PASTE_START}${draft}${BRACKETED_PASTE_END}`);
         },
         INITIAL_PROMPT_DELAY_MS,
       );
@@ -535,6 +772,10 @@ export const createSessionRuntime = ({
         `Terminal session limit reached (${sessionLimit}). Close an existing terminal session or increase OCTOGENT_MAX_TERMINAL_SESSIONS.`,
       );
     }
+    const refusal = checkSessionAdmission?.();
+    if (refusal) {
+      throw new Error(refusal);
+    }
 
     const terminalRecord = terminals.get(sessionId);
 
@@ -545,14 +786,26 @@ export const createSessionRuntime = ({
 
     ensureNodePtySpawnHelperExecutable();
     const shellLaunch = getShellLaunch();
+    const inheritedEnv = getInheritedEnv?.(sessionId);
+    if (!inheritedEnv && terminalRecord?.inheritedEnv?.length) {
+      logVerbose(
+        `[Session] inherited env ${terminalRecord.inheritedEnv.join(", ")} not available after a server restart session=${sessionId}; use .octogent/env for variables that must persist`,
+      );
+    }
 
     let pty: IPty;
     try {
       pty = spawn(shellLaunch.command, shellLaunch.args, {
-        cols: DEFAULT_PTY_COLS,
-        rows: DEFAULT_PTY_ROWS,
+        cols: TERMINAL_DEFAULT_COLS,
+        rows: TERMINAL_DEFAULT_ROWS,
         cwd: tentacleCwd,
-        env: createShellEnvironment({ octogentSessionId: sessionId }),
+        env: createShellEnvironment({
+          octogentSessionId: sessionId,
+          ...(getApiBaseUrl ? { apiBaseUrl: getApiBaseUrl() } : {}),
+          ...(projectId ? { projectId } : {}),
+          ...(workspaceCwd ? { workspaceCwd } : {}),
+          ...(inheritedEnv ? { inheritedEnv } : {}),
+        }),
         name: "xterm-256color",
       });
     } catch (error) {
@@ -570,8 +823,8 @@ export const createSessionRuntime = ({
       pty,
       clients: new Set(),
       directListeners: new Set(),
-      cols: DEFAULT_PTY_COLS,
-      rows: DEFAULT_PTY_ROWS,
+      cols: TERMINAL_DEFAULT_COLS,
+      rows: TERMINAL_DEFAULT_ROWS,
       agentState: stateTracker.currentState,
       stateTracker,
       isBootstrapCommandSent: false,
@@ -581,6 +834,10 @@ export const createSessionRuntime = ({
       pendingInput: "",
       hasTranscriptEnded: false,
       keepAliveWithoutClients: Boolean(terminalRecord?.initialPrompt),
+      providerErrorScanner: createProviderErrorScanner(),
+      ...(terminalRecord?.agentProvider === "codex"
+        ? { codexRateLimitPromptScanner: createCodexRateLimitPromptScanner() }
+        : {}),
     };
     if (debugLog) {
       session.debugLog = debugLog;
@@ -602,22 +859,38 @@ export const createSessionRuntime = ({
       emitStateIfChanged(session, sessionId, session.stateTracker.poll(Date.now()));
     }, 300);
 
-    const dataDisposable = session.pty.onData((chunk) => {
+    const dataDisposable = pty.onData((chunk) => {
       if (session.isClosed) {
         return;
       }
 
       appendDebugLog(session, `pty-output session=${sessionId} chunk=${JSON.stringify(chunk)}`);
       appendScrollback(session, chunk);
-      const nextState = session.stateTracker.observeChunk(chunk, Date.now());
+      const now = Date.now();
+      const nextState = session.stateTracker.observeChunk(chunk, now);
       broadcastMessage(session, {
         type: "output",
         data: chunk,
       });
       emitStateIfChanged(session, sessionId, nextState);
+      const providerError = session.providerErrorScanner?.push(chunk);
+      if (providerError) {
+        noteProviderError(session, providerError);
+      }
+      const rateLimitPrompt = session.codexRateLimitPromptScanner?.push(chunk);
+      if (rateLimitPrompt) {
+        handleCodexRateLimitPrompt(sessionId, session, rateLimitPrompt);
+      }
+      if (
+        onOutputActivity &&
+        now - (session.lastOutputActivityAt ?? 0) >= OUTPUT_ACTIVITY_THROTTLE_MS
+      ) {
+        session.lastOutputActivityAt = now;
+        onOutputActivity(sessionId);
+      }
     });
 
-    const exitDisposable = session.pty.onExit(({ exitCode, signal }) => {
+    const exitDisposable = pty.onExit(({ exitCode, signal }) => {
       if (session.isClosed) {
         return;
       }
@@ -711,7 +984,7 @@ export const createSessionRuntime = ({
               session,
               `ws-input session=${sessionId} data=${JSON.stringify(payload.data)}`,
             );
-            session.pty.write(payload.data);
+            session.pty?.write(payload.data);
             if (/[\r\n]/.test(payload.data)) {
               emitStateIfChanged(
                 session,
@@ -735,10 +1008,10 @@ export const createSessionRuntime = ({
 
             session.cols = nextCols;
             session.rows = nextRows;
-            session.pty.resize(nextCols, nextRows);
+            session.pty?.resize(nextCols, nextRows);
           }
         } catch {
-          session.pty.write(text);
+          session.pty?.write(text);
         }
       });
 
@@ -824,9 +1097,100 @@ export const createSessionRuntime = ({
       return false;
     }
 
-    session.pty.write(data);
+    session.pty?.write(data);
     if (/[\r\n]/.test(data)) {
       emitStateIfChanged(session, terminalId, session.stateTracker.observeSubmit(Date.now()));
+    }
+    return true;
+  };
+
+  const screenPath = (terminalId: string) =>
+    join(transcriptDirectoryPath, `${encodeURIComponent(terminalId)}.screen.txt`);
+
+  // Replays the same history the browser terminal receives, so both views agree.
+  const renderSessionScreen = (session: TerminalSession, lines: number) =>
+    renderScreen(stripBrokenLeadingAnsi(session.scrollbackChunks.join("")), {
+      lines,
+      cols: session.cols,
+      rows: session.rows,
+    });
+
+  const SAVED_SCREEN_LINES = 200;
+  // A slow render of an earlier session must not overwrite a later session's screen.
+  const pendingScreenRenders = new Map<string, Promise<string>>();
+
+  const saveLastScreen = (terminalId: string, session: TerminalSession) => {
+    const path = screenPath(terminalId);
+    const write = (text: string) => {
+      try {
+        ensureTranscriptDirectory(transcriptDirectoryPath);
+        writeFileSync(path, text, "utf8");
+      } catch {
+        // A full disk or unwritable transcript directory must never prevent PTY cleanup.
+      }
+    };
+    // The stripped text lands synchronously so a server that exits before the
+    // emulator finishes still leaves a screen; the rendered one replaces it.
+    write(screenTail(session.scrollbackChunks.join(""), SAVED_SCREEN_LINES));
+    const render = renderSessionScreen(session, SAVED_SCREEN_LINES);
+    pendingScreenRenders.set(terminalId, render);
+    void render
+      .then((text) => {
+        if (pendingScreenRenders.get(terminalId) === render) write(text);
+      })
+      .catch(() => {
+        // The stripped text already on disk is the fallback.
+      })
+      .finally(() => {
+        if (pendingScreenRenders.get(terminalId) === render) {
+          pendingScreenRenders.delete(terminalId);
+        }
+      });
+  };
+
+  const getScreen = async (terminalId: string, lines = 40, raw = false) => {
+    const session = sessions.get(terminalId);
+    if (session && !session.isClosed) {
+      return {
+        text: raw
+          ? screenTail(session.scrollbackChunks.join(""), lines, true)
+          : await renderSessionScreen(session, lines),
+        savedAt: null,
+        raw,
+      };
+    }
+    try {
+      const path = screenPath(terminalId);
+      return {
+        // Saved screens are already plain text, so only the tail is taken.
+        text: screenTail(readFileSync(path, "utf8"), lines, true),
+        savedAt: statSync(path).mtime.toISOString(),
+        raw: false,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const submitInput = (terminalId: string, payload: unknown): boolean => {
+    const { data, enter } = parseTerminalInput(payload);
+    const session = sessions.get(terminalId);
+    if (!session || session.isClosed || !session.pty) return false;
+    reviveSessionTranscript(terminalId);
+    if (data) writeInput(terminalId, data);
+    appendTranscriptEvent(session, terminalId, {
+      type: "input_submit",
+      submitId: randomUUID(),
+      text: data + (enter ? "\r" : ""),
+      timestamp: new Date().toISOString(),
+    });
+    if (enter) {
+      schedulePromptTimer(
+        session,
+        terminalId,
+        () => writeInput(terminalId, "\r"),
+        AGENT_INJECT_SUBMIT_DELAY_MS,
+      );
     }
     return true;
   };
@@ -845,7 +1209,7 @@ export const createSessionRuntime = ({
 
     session.cols = nextCols;
     session.rows = nextRows;
-    session.pty.resize(nextCols, nextRows);
+    session.pty?.resize(nextCols, nextRows);
     return true;
   };
 
@@ -860,10 +1224,53 @@ export const createSessionRuntime = ({
     return true;
   };
 
+  // A fresh agent session can start inside a PTY whose previous transcript was
+  // closed (the prior agent exited). Without reviving the log, the new agent's
+  // events are dropped and queued channel messages can never be delivered.
+  const appendSessionTranscriptEvent = (
+    sessionId: string,
+    event: ConversationTranscriptEventPayload,
+  ): boolean => {
+    const session = sessions.get(sessionId);
+    if (!session || session.isClosed) {
+      return false;
+    }
+    appendTranscriptEvent(session, sessionId, event);
+    return true;
+  };
+
+  const reviveSessionTranscript = (sessionId: string): boolean => {
+    const session = sessions.get(sessionId);
+    if (!session || session.isClosed) {
+      return false;
+    }
+
+    if (!session.hasTranscriptEnded && session.transcriptLog) {
+      return true;
+    }
+
+    session.hasTranscriptEnded = false;
+    if (!session.transcriptLog) {
+      session.transcriptLog = createTranscriptLog(sessionId);
+    }
+    appendTranscriptEvent(session, sessionId, {
+      type: "session_start",
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  };
+
   return {
+    getScreen,
+    submitInput,
     closeSession,
     stopSession,
     killSession,
+    sendInitialPromptNow,
+    acknowledgeInitialPrompt,
+    scheduleSessionTimer,
+    reviveSessionTranscript,
+    appendSessionTranscriptEvent,
     handleUpgrade,
     connectDirect,
     startSession,

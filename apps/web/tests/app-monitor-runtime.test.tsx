@@ -60,11 +60,11 @@ describe("App Monitor runtime", () => {
       }
 
       if (url.endsWith("/api/ui-state") && method === "GET") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/ui-state") && method === "PATCH") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/monitor/config") && method === "GET") {
@@ -203,7 +203,7 @@ describe("App Monitor runtime", () => {
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "[5] Monitor",
+        name: "[6] Monitor",
       }),
     );
 
@@ -329,11 +329,11 @@ describe("App Monitor runtime", () => {
       }
 
       if (url.endsWith("/api/ui-state") && method === "GET") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/ui-state") && method === "PATCH") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/monitor/config") && method === "GET") {
@@ -427,7 +427,7 @@ describe("App Monitor runtime", () => {
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "[5] Monitor",
+        name: "[6] Monitor",
       }),
     );
 
@@ -490,13 +490,14 @@ describe("App Monitor runtime", () => {
 
       if (url.endsWith("/api/ui-state") && method === "GET") {
         return jsonResponse({
+          locale: "en",
           isMonitorVisible: true,
           isBottomTelemetryVisible: true,
         });
       }
 
       if (url.endsWith("/api/ui-state") && method === "PATCH") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/monitor/config") && method === "GET") {
@@ -616,13 +617,14 @@ describe("App Monitor runtime", () => {
 
       if (url.endsWith("/api/ui-state") && method === "GET") {
         return jsonResponse({
+          locale: "en",
           isMonitorVisible: false,
           isBottomTelemetryVisible: true,
         });
       }
 
       if (url.endsWith("/api/ui-state") && method === "PATCH") {
-        return jsonResponse({});
+        return jsonResponse({ locale: "en" });
       }
 
       if (url.endsWith("/api/monitor/config") && method === "GET") {
@@ -647,7 +649,7 @@ describe("App Monitor runtime", () => {
 
     expect(screen.queryByLabelText("Telemetry ticker tape")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "[5] Monitor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "[6] Monitor" }));
     expect(await screen.findByLabelText("Monitor primary view disabled")).toBeInTheDocument();
 
     expect(monitorConfigCalls).toBe(0);

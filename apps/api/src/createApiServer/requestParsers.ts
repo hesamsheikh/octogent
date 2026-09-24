@@ -4,13 +4,16 @@ const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
 export class RequestBodyTooLargeError extends Error {}
 
-export const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
+export const readJsonBody = async (
+  request: IncomingMessage,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<unknown> => {
   let totalBytes = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const nextChunk = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     totalBytes += nextChunk.length;
-    if (totalBytes > MAX_JSON_BODY_BYTES) {
+    if (totalBytes > maxBytes) {
       throw new RequestBodyTooLargeError("Request body too large.");
     }
     chunks.push(nextChunk);

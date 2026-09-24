@@ -1,12 +1,8 @@
 import { useMemo } from "react";
 
 import type { GraphNode } from "../../app/canvas/types";
-import {
-  type OctopusAccessory,
-  type OctopusAnimation,
-  type OctopusExpression,
-  OctopusGlyph,
-} from "../EmptyOctopus";
+import { deriveOctopusVisuals } from "../../app/octopusVisuals";
+import { OctopusGlyph } from "../EmptyOctopus";
 
 const LINE_MAX = 22;
 
@@ -30,50 +26,6 @@ const splitLabel = (label: string): [string] | [string, string] => {
     label.slice(LINE_MAX - 1, LINE_MAX * 2 - 2) + (label.length > LINE_MAX * 2 - 2 ? "…" : ""),
   ];
 };
-
-const ANIMATIONS: OctopusAnimation[] = ["sway", "walk", "jog", "bounce", "float", "swim-up"];
-const EXPRESSIONS: OctopusExpression[] = ["normal", "happy", "angry", "surprised"];
-const ACCESSORIES: OctopusAccessory[] = ["none", "none", "long", "mohawk", "side-sweep", "curly"];
-
-function hashString(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function seededRandom(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 16807 + 0) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
-
-type OctopusVisuals = {
-  animation: OctopusAnimation;
-  expression: OctopusExpression;
-  accessory: OctopusAccessory;
-  hairColor?: string | undefined;
-};
-
-function deriveOctopusVisuals(node: GraphNode): OctopusVisuals {
-  const rng = seededRandom(hashString(node.tentacleId));
-  const stored = node.octopus;
-  return {
-    animation:
-      (stored?.animation as OctopusAnimation | null) ??
-      (ANIMATIONS[Math.floor(rng() * ANIMATIONS.length)] as OctopusAnimation),
-    expression:
-      (stored?.expression as OctopusExpression | null) ??
-      (EXPRESSIONS[Math.floor(rng() * EXPRESSIONS.length)] as OctopusExpression),
-    accessory:
-      (stored?.accessory as OctopusAccessory | null) ??
-      (ACCESSORIES[Math.floor(rng() * ACCESSORIES.length)] as OctopusAccessory),
-    hairColor: stored?.hairColor ?? undefined,
-  };
-}
 
 type OctopusNodeProps = {
   node: GraphNode;
@@ -195,8 +147,17 @@ export const OctopusNode = ({
   const visuals = useMemo(
     () =>
       isOctoboss
-        ? ({ animation: "sway", expression: "normal", accessory: "none" } as OctopusVisuals)
-        : deriveOctopusVisuals(node),
+        ? {
+            animation: "sway" as const,
+            expression: "normal" as const,
+            accessory: "none" as const,
+            hairColor: undefined,
+          }
+        : deriveOctopusVisuals({
+            tentacleId: node.tentacleId,
+            color: node.color,
+            ...(node.octopus ? { octopus: node.octopus } : {}),
+          }),
     [node, isOctoboss],
   );
   const glyphScale = isOctoboss ? 6 : GLYPH_SCALE;

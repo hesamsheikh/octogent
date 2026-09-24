@@ -407,6 +407,8 @@ describe("createApiServer", () => {
     temporaryDirectories.length = 0;
   });
 
+  const REGISTRY_PERSIST_BUDGET_MS = 8_000;
+
   const startServer = async (options: Partial<Parameters<typeof createApiServer>[0]> = {}) => {
     const workspaceCwd =
       options.workspaceCwd ??
@@ -425,6 +427,93 @@ describe("createApiServer", () => {
     return `http://${address.host}:${address.port}`;
   };
 
+  it("reads live and saved screens and sends bounded direct input through protected routes", async () => {
+    let output: (chunk: string) => void = () => {};
+    let exit: (event: { exitCode: number; signal: number }) => void = () => {};
+    const write = vi.fn();
+    spawnMock.mockReturnValue({
+      pid: 12345,
+      write,
+      kill: vi.fn(),
+      resize: vi.fn(),
+      onData: (listener: typeof output) => {
+        output = listener;
+        return { dispose: vi.fn() };
+      },
+      onExit: (listener: typeof exit) => {
+        exit = listener;
+        return { dispose: vi.fn() };
+      },
+    });
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-screen-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    const baseUrl = await startServer({ workspaceCwd });
+    const created = await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceMode: "shared",
+        name: "screen-worker",
+        initialPrompt: "hello",
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { terminalId } = (await created.json()) as { terminalId: string };
+    const url = `${baseUrl}/api/terminals/${terminalId}`;
+    output("old\r\n\x1b[31mLimit reached\x1b[0m\r\nTry later\x1b[1;1H\x1b[2KUsage");
+    const screen = await fetch(`${url}/screen?lines=3`);
+    expect(screen.status).toBe(200);
+    expect(await screen.json()).toMatchObject({
+      text: "Usage\nLimit reached\nTry later",
+      savedAt: null,
+    });
+    expect(await (await fetch(`${url}/screen?lines=2&raw=1`)).json()).toMatchObject({
+      text: "\x1b[31mLimit reached\x1b[0m\r\nTry later\x1b[1;1H\x1b[2KUsage",
+      raw: true,
+    });
+    for (const lines of ["0", "-1", "1.5", "NaN", "201"]) {
+      expect((await fetch(`${url}/screen?lines=${lines}`)).status).toBe(400);
+    }
+    write.mockClear();
+    const send = (payload: unknown, origin?: string) =>
+      fetch(`${url}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) },
+        body: JSON.stringify(payload),
+      });
+    expect((await send({ text: "1", enter: true, keys: ["tab"] })).status).toBe(200);
+    expect(write).toHaveBeenCalledWith("1\t");
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith("\r"));
+    expect((await send({ keys: ["unknown"] })).status).toBe(400);
+    expect((await send({ text: "x".repeat(4097) })).status).toBe(413);
+    expect((await send({ text: "1" }, "https://evil.example")).status).toBe(403);
+    expect(
+      (
+        await fetch(`${baseUrl}/api/terminals/missing/input`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: '{"text":"1"}',
+        })
+      ).status,
+    ).toBe(404);
+    expect((await fetch(`${baseUrl}/api/terminals/missing/screen`)).status).toBe(404);
+    exit({ exitCode: 1, signal: 0 });
+    await vi.waitFor(async () =>
+      expect(await (await fetch(`${url}/screen?lines=2`)).json()).toMatchObject({
+        text: "Limit reached\nTry later",
+        savedAt: expect.any(String),
+      }),
+    );
+    expect((await send({ text: "1" })).status).toBe(404);
+    await stopServer?.();
+    stopServer = null;
+    const restarted = await startServer({ workspaceCwd });
+    expect(
+      await (await fetch(`${restarted}/api/terminals/${terminalId}/screen?lines=2&raw=1`)).json(),
+    ).toMatchObject({ text: "Limit reached\nTry later", savedAt: expect.any(String), raw: false });
+    spawnMock.mockReset();
+  });
+
   const toWebSocketBaseUrl = (httpBaseUrl: string) =>
     httpBaseUrl.startsWith("https://")
       ? httpBaseUrl.replace("https://", "wss://")
@@ -435,20 +524,33 @@ describe("createApiServer", () => {
     predicate: (document: TDocument) => boolean,
   ): Promise<TDocument> => {
     const registryPath = join(workspaceCwd, ".octogent", "state", "tentacles.json");
-    const timeoutAt = Date.now() + 2_000;
+    // Persistence lands in ~100ms idle; the budget absorbs IO stalls when the
+    // whole monorepo suite runs in parallel, and only slows a genuine failure.
+    const timeoutAt = Date.now() + REGISTRY_PERSIST_BUDGET_MS;
+    let lastSeen: string | null = null;
 
     while (Date.now() < timeoutAt) {
       if (existsSync(registryPath)) {
-        const document = JSON.parse(readFileSync(registryPath, "utf8")) as TDocument;
-        if (predicate(document)) {
-          return document;
+        lastSeen = readFileSync(registryPath, "utf8");
+        try {
+          const document = JSON.parse(lastSeen) as TDocument;
+          if (predicate(document)) {
+            return document;
+          }
+        } catch {
+          // The registry write is not atomic, so a poll can observe a
+          // half-written file. Treat it as "not persisted yet" and keep polling.
         }
       }
 
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    throw new Error(`Timed out waiting for registry persistence at ${registryPath}`);
+    // Report what the registry actually held so a rare timeout is diagnosable
+    // from CI output alone.
+    throw new Error(
+      `Timed out after ${REGISTRY_PERSIST_BUDGET_MS}ms waiting for registry persistence at ${registryPath}. Last contents: ${lastSeen ?? "<file never appeared>"}`,
+    );
   };
 
   const writeConversationTranscript = (
@@ -498,6 +600,24 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([]);
+  });
+
+  it("writes Claude hooks against the unprefixed server base in single-project mode", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-hook-base-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const created = await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceMode: "shared" }),
+    });
+    expect(created.status).toBe(201);
+
+    const settings = readFileSync(join(workspaceCwd, ".claude", "settings.json"), "utf8");
+    expect(settings).toContain(`"${baseUrl}/api/hooks/session-start?octogent_session=`);
+    expect(settings).toContain(`"url": "${baseUrl}/api/hooks/pre-tool-use"`);
+    expect(settings).not.toContain("/api/p/");
   });
 
   it("returns session summaries for GET /api/conversations", async () => {
@@ -828,6 +948,38 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(codexSnapshot);
+  });
+
+  it("warns on terminal create from the cached usage snapshot without reading it anew", async () => {
+    const readCodexUsageSnapshot = vi.fn(async () => ({
+      status: "ok" as const,
+      source: "oauth-api" as const,
+      fetchedAt: new Date().toISOString(),
+      primaryUsedPercent: 100,
+      primaryResetAt: new Date(Date.now() + 3_600_000).toISOString(),
+      secondaryUsedPercent: 30,
+    }));
+    const baseUrl = await startServer({ readCodexUsageSnapshot });
+    const create = async (agentProvider: string) => {
+      const response = await fetch(`${baseUrl}/api/terminals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceMode: "shared", agentProvider }),
+      });
+      expect(response.status).toBe(201);
+      return (await response.json()) as Record<string, unknown>;
+    };
+
+    // Nothing cached yet: no warning, and no usage read on the create path.
+    expect((await create("codex")).usageWarning).toBeUndefined();
+    expect(readCodexUsageSnapshot).not.toHaveBeenCalled();
+
+    await fetch(`${baseUrl}/api/codex/usage`);
+    expect(await create("codex")).toMatchObject({
+      usageWarning: { provider: "codex", bucket: "5-hour", usedPercent: 100 },
+    });
+    expect((await create("claude-code")).usageWarning).toBeUndefined();
+    expect(readCodexUsageSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it("returns claude usage snapshot for GET /api/claude/usage", async () => {
@@ -1240,6 +1392,41 @@ describe("createApiServer", () => {
     });
 
     expect(response.status).toBe(405);
+  });
+
+  it("round-trips persisted fields through /api/ui-state", async () => {
+    // If any layer strips this field, the client replays the nav-index
+    // migration on every load and the restored page shifts by one per refresh.
+    const baseUrl = await startServer();
+
+    const patchResponse = await fetch(`${baseUrl}/api/ui-state`, {
+      method: "PATCH",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        activePrimaryNav: 1,
+        navSchemaVersion: 2,
+        locale: "zh-CN",
+        terminalInactivityThresholdMs: 120_000,
+      }),
+    });
+    expect(patchResponse.status).toBe(200);
+
+    const readResponse = await fetch(`${baseUrl}/api/ui-state`, {
+      headers: { Accept: "application/json" },
+    });
+    const payload = (await readResponse.json()) as {
+      activePrimaryNav?: number;
+      navSchemaVersion?: number;
+      locale?: string;
+      terminalInactivityThresholdMs?: number;
+    };
+    expect(payload.activePrimaryNav).toBe(1);
+    expect(payload.navSchemaVersion).toBe(2);
+    expect(payload.locale).toBe("zh-CN");
+    expect(payload.terminalInactivityThresholdMs).toBe(120_000);
   });
 
   it("reports file-backed workspace setup status and updates it through setup actions", async () => {
@@ -1932,6 +2119,162 @@ describe("createApiServer", () => {
         }),
       ]),
     );
+  });
+
+  it("spawns workers with the project's .octogent/env and the caller's inherited variables", async () => {
+    spawnMock.mockReset();
+    spawnMock.mockReturnValue({
+      pid: 4242,
+      write: vi.fn(),
+      kill: vi.fn(),
+      resize: vi.fn(),
+      onData: () => ({ dispose: vi.fn() }),
+      onExit: () => ({ dispose: vi.fn() }),
+    });
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    mkdirSync(join(workspaceCwd, ".octogent"), { recursive: true });
+    writeFileSync(
+      join(workspaceCwd, ".octogent", "env"),
+      "PATH=$PWD/.venv/bin:$PATH\nPROJECT_FLAG=on\nOCTOGENT_API_BASE=http://elsewhere\n",
+      "utf8",
+    );
+    const baseUrl = await startServer({ workspaceCwd });
+
+    const createResponse = await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "venv-worker",
+        initialPrompt: "Run the tests.",
+        inheritEnv: ["VIRTUAL_ENV", "CALLER_TOKEN"],
+        env: { VIRTUAL_ENV: "/caller/.venv", CALLER_TOKEN: "caller-secret-value" },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const createdText = await createResponse.text();
+    expect(createdText).not.toContain("caller-secret-value");
+    const created = JSON.parse(createdText) as { terminalId: string; inheritedEnv?: string[] };
+    expect(created.inheritedEnv).toEqual(["VIRTUAL_ENV", "CALLER_TOKEN"]);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const spawnEnv = (spawnMock.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(spawnEnv.PATH).toBe(`${workspaceCwd}/.venv/bin:${process.env.PATH}`);
+    expect(spawnEnv.PROJECT_FLAG).toBe("on");
+    expect(spawnEnv.VIRTUAL_ENV).toBe("/caller/.venv");
+    expect(spawnEnv.CALLER_TOKEN).toBe("caller-secret-value");
+    expect(spawnEnv.OCTOGENT_SESSION_ID).toBe(created.terminalId);
+    expect(spawnEnv.OCTOGENT_API_BASE).not.toBe("http://elsewhere");
+
+    const snapshots = (await (await fetch(`${baseUrl}/api/terminal-snapshots`)).json()) as Array<{
+      terminalId: string;
+      inheritedEnv?: string[];
+    }>;
+    expect(snapshots.find((entry) => entry.terminalId === created.terminalId)).toMatchObject({
+      inheritedEnv: ["VIRTUAL_ENV", "CALLER_TOKEN"],
+    });
+
+    const registry = await waitForRegistryDocument<{
+      terminals: Array<{ terminalId: string; inheritedEnv?: string[] }>;
+    }>(workspaceCwd, (document) =>
+      document.terminals.some((terminal) => terminal.inheritedEnv !== undefined),
+    );
+    expect(registry.terminals[0]?.inheritedEnv).toEqual(["VIRTUAL_ENV", "CALLER_TOKEN"]);
+    const registryText = readFileSync(
+      join(workspaceCwd, ".octogent", "state", "tentacles.json"),
+      "utf8",
+    );
+    expect(registryText).not.toContain("caller-secret-value");
+    expect(registryText).not.toContain("/caller/.venv");
+
+    await stopServer?.();
+    stopServer = null;
+    const restartedUrl = await startServer({ workspaceCwd });
+    const restartedSnapshots = (await (
+      await fetch(`${restartedUrl}/api/terminal-snapshots`)
+    ).json()) as Array<{ terminalId: string; inheritedEnv?: string[] }>;
+    expect(
+      restartedSnapshots.find((entry) => entry.terminalId === created.terminalId)?.inheritedEnv,
+    ).toEqual(["VIRTUAL_ENV", "CALLER_TOKEN"]);
+    spawnMock.mockReset();
+  });
+
+  it("rejects malformed inheritEnv requests with 400", async () => {
+    const baseUrl = await startServer();
+    const create = (body: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/terminals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceMode: "shared", ...body }),
+      });
+
+    const invalidBodies: Array<Record<string, unknown>> = [
+      { inheritEnv: "PATH", env: { PATH: "/bin" } },
+      { inheritEnv: ["lower_case"], env: { lower_case: "x" } },
+      { inheritEnv: ["BAD-NAME"], env: { "BAD-NAME": "x" } },
+      { inheritEnv: [42], env: {} },
+      { inheritEnv: ["PATH"] },
+      { inheritEnv: ["PATH"], env: {} },
+      { inheritEnv: ["PATH"], env: { PATH: "/bin", EXTRA: "not listed" } },
+      { inheritEnv: ["PATH"], env: { PATH: 7 } },
+      { inheritEnv: ["PATH"], env: { PATH: "/bin\n/evil" } },
+      { inheritEnv: ["PATH"], env: { PATH: "/bin\u0000" } },
+      { inheritEnv: ["PATH"], env: ["/bin"] },
+      { env: { PATH: "/bin" } },
+      {
+        inheritEnv: Array.from({ length: 65 }, (_, index) => `VAR_${index}`),
+        env: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`VAR_${index}`, "x"])),
+      },
+    ];
+    for (const body of invalidBodies) {
+      const response = await create(body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(((await response.json()) as { error?: string }).error).toEqual(expect.any(String));
+    }
+
+    const snapshots = (await (
+      await fetch(`${baseUrl}/api/terminal-snapshots`)
+    ).json()) as unknown[];
+    expect(snapshots).toEqual([]);
+
+    const accepted = await create({ inheritEnv: [], env: {} });
+    expect(accepted.status).toBe(201);
+    expect(await accepted.json()).not.toHaveProperty("inheritedEnv");
+  });
+
+  it("hands prompt templates the full API base, not just the port", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    const promptsDir = join(process.cwd(), "..", "..", "prompts");
+    const baseUrl = await startServer({ workspaceCwd, promptsDir });
+
+    const createResponse = await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        workspaceMode: "shared",
+        promptTemplate: "swarm-worker",
+        promptVariables: { tentacleName: "Docs", tentacleId: "docs", todoItemText: "x" },
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const { terminalId } = (await createResponse.json()) as { terminalId: string };
+
+    // Under the hub the port alone reaches the hub root, so swarm prompts
+    // must carry the project-scoped base the server hands out.
+    const registryDocument = await waitForRegistryDocument<{
+      terminals: Array<{ terminalId: string; initialPrompt?: string }>;
+    }>(workspaceCwd, (document) =>
+      document.terminals.some(
+        (terminal) => terminal.terminalId === terminalId && Boolean(terminal.initialPrompt),
+      ),
+    );
+    const terminal = registryDocument.terminals.find((entry) => entry.terminalId === terminalId);
+    expect(terminal?.initialPrompt).toContain(`The API is at \`${baseUrl}\`.`);
+    expect(terminal?.initialPrompt).not.toContain("{{apiBaseUrl}}");
   });
 
   it("injects a default tentacle context prompt for tentacle terminals", async () => {
@@ -2662,7 +3005,7 @@ describe("createApiServer", () => {
       }),
     );
 
-    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1?removeWorktree=true`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",
@@ -2671,6 +3014,28 @@ describe("createApiServer", () => {
     expect(deleteResponse.status).toBe(204);
     expect(gitClient.getWorktree(expectedWorktreePath)).toBeNull();
     expect(gitClient.hasBranch("octogent/terminal-1")).toBe(false);
+  });
+
+  it("keeps the worktree on a plain delete and reclaims it only on request", async () => {
+    const workspaceCwd = mkdtempSync(join(tmpdir(), "octogent-api-test-"));
+    temporaryDirectories.push(workspaceCwd);
+    const gitClient = new FakeGitClient();
+    const baseUrl = await startServer({ workspaceCwd, gitClient });
+
+    await fetch(`${baseUrl}/api/terminals`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceMode: "worktree" }),
+    });
+    const expectedWorktreePath = join(workspaceCwd, ".octogent", "worktrees", "terminal-1");
+
+    // Plain delete: record gone, worktree still on disk (the iron rule).
+    const plain = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    expect(plain.status).toBe(204);
+    expect(gitClient.getWorktree(expectedWorktreePath)).not.toBeNull();
   });
 
   it("returns 409 and keeps tentacle state when worktree deletion fails", async () => {
@@ -2697,7 +3062,7 @@ describe("createApiServer", () => {
     const expectedWorktreePath = join(workspaceCwd, ".octogent", "worktrees", "terminal-1");
     gitClient.setFailRemoveWorktree(true);
 
-    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1`, {
+    const deleteResponse = await fetch(`${baseUrl}/api/terminals/terminal-1?removeWorktree=true`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",

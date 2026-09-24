@@ -32,6 +32,9 @@
   - `docs/concepts/tentacles.md`
   - `docs/concepts/runtime-and-api.md`
 - Workflow guides:
+  - `docs/zh-CN/guides/getting-work-done.md` (Chinese-first getting-started workflow)
+  - `docs/guides/getting-work-done.md` (full English translation)
+  - `docs/guides/hub.md` + `docs/zh-CN/guides/hub.md` (the hub: starting it, projects, worker environment, upgrading)
   - `docs/guides/working-with-todos.md`
   - `docs/guides/orchestrating-child-agents.md`
   - `docs/guides/inter-agent-messaging.md`
@@ -40,6 +43,7 @@
   - `docs/reference/api.md`
   - `docs/reference/filesystem-layout.md`
   - `docs/reference/troubleshooting.md`
+  - `docs/reference/systemd.md` (the hub as a systemd user service)
 - Read only the docs relevant to the surface you are touching. Do not do a full docs sweep unless the task is documentation maintenance.
 
 ## Architecture Boundaries

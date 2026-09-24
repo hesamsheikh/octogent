@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { buildCodeIntelEventsUrl } from "../../runtime/runtimeEndpoints";
 import {
   type CodeIntelEvent,
   type CouplingData,
@@ -26,7 +27,7 @@ export const useCodeIntelRuntime = (enabled: boolean): CodeIntelRuntimeResult =>
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/code-intel/events");
+      const response = await fetch(buildCodeIntelEventsUrl());
       if (!response.ok) {
         setError(`Failed to load events: ${response.status}`);
         return;

@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CanvasTentaclePanel } from "../src/components/canvas/CanvasTentaclePanel";
+import { renderWithLocale } from "./test-utils/renderWithLocale";
 
 const tentacle = {
   tentacleId: "docs-knowledge",
@@ -35,7 +36,7 @@ describe("CanvasTentaclePanel actions", () => {
   it("offers worktree and normal swarm options", async () => {
     const onSpawnSwarm = vi.fn();
 
-    render(
+    renderWithLocale(
       <CanvasTentaclePanel
         node={{
           id: "docs-knowledge",
@@ -89,7 +90,7 @@ describe("CanvasTentaclePanel actions", () => {
       return new Response("not-found", { status: 404 });
     });
 
-    render(
+    renderWithLocale(
       <CanvasTentaclePanel
         node={{
           id: "docs-knowledge",
@@ -137,7 +138,7 @@ describe("CanvasTentaclePanel actions", () => {
       return new Response("not-found", { status: 404 });
     });
 
-    render(
+    renderWithLocale(
       <CanvasTentaclePanel
         node={{
           id: "docs-knowledge",
@@ -167,7 +168,7 @@ describe("CanvasTentaclePanel actions", () => {
   });
 
   it("shows suggested skills in the tentacle detail panel", async () => {
-    render(
+    renderWithLocale(
       <CanvasTentaclePanel
         node={{
           id: "docs-knowledge",

@@ -1,0 +1,322 @@
+/* ─── Flow view: pseudo-3D fleet progress ────────────────────────────────── */
+
+.flow-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  background: radial-gradient(ellipse at 30% 20%, rgba(212, 160, 23, 0.05), transparent 60%),
+    var(--bg-primary, #0a0a0a);
+  user-select: none;
+  touch-action: none;
+}
+
+.flow-view:active {
+  cursor: grabbing;
+}
+
+.flow-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Links inherit `color` from their <g> (the owning tentacle's color), so one
+   branch — octoboss → tentacle → agents — reads as a single colored path. */
+.flow-link {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+
+.flow-link--trunk {
+  stroke-width: 2.25;
+  opacity: 0.75;
+}
+
+.flow-link--active {
+  opacity: 1;
+  filter: drop-shadow(0 0 4px currentcolor);
+}
+
+.flow-link-pulse {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 5px currentcolor) drop-shadow(0 0 10px currentcolor);
+}
+
+/* The node box is the glyph alone; the label hangs below it out of flow, so
+   the projected point (and every link ending there) is the glyph's center
+   rather than the center of glyph-plus-label, which sat visibly too low. */
+.flow-node {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.flow-node:hover {
+  filter: brightness(1.25);
+}
+
+.flow-node--shelved {
+  opacity: 0.9;
+}
+
+.flow-node-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 140px;
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--accent-primary, #d4a017);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-agent-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 10px currentcolor;
+}
+
+.flow-agent-dot--live {
+  background: #00c8ff;
+  color: #00c8ff;
+}
+
+.flow-agent-dot--review {
+  background: #f59e0b;
+  color: #f59e0b;
+  animation: flow-dot-pulse 1.5s ease-in-out infinite;
+}
+
+.flow-agent-dot--done {
+  background: #22c55e;
+  color: #22c55e;
+}
+
+.flow-agent-dot--attention {
+  background: #f59e0b;
+  color: #f59e0b;
+}
+
+.flow-agent-dot--inactive {
+  background: #6b7280;
+  color: transparent;
+}
+
+@keyframes flow-dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px currentcolor;
+  }
+  50% {
+    box-shadow: 0 0 16px currentcolor;
+  }
+}
+
+/* ─── Hover / pinned card ─────────────────────────────────────────────────── */
+
+.flow-card-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.flow-card {
+  width: 240px;
+  padding: 10px 12px;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 6px;
+  background: rgba(10, 10, 10, 0.92);
+  pointer-events: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.flow-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flow-card-title {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-primary, #d4a017);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-card-state {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(0, 200, 255, 0.15);
+  color: #00c8ff;
+}
+
+.flow-card-state--awaiting-review {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+}
+
+.flow-card-state--completed {
+  background: rgba(34, 197, 94, 0.16);
+  color: #22c55e;
+}
+
+.flow-card-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.flow-card-progress-track {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.flow-card-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent-primary, #d4a017);
+  transition: width 300ms ease;
+}
+
+.flow-card-progress-text {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
+.flow-card-summary {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.flow-card-task {
+  margin: 0 0 4px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.85);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flow-card-facts {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.flow-card-open {
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: 1px solid rgba(212, 160, 23, 0.5);
+  border-radius: 4px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--accent-primary, #d4a017);
+  cursor: pointer;
+}
+
+.flow-card-open:hover {
+  background: rgba(212, 160, 23, 0.15);
+}
+
+.flow-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 14px;
+  margin: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.flow-card-role {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.flow-card-agent {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.flow-card-agent-label {
+  margin-right: 6px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.flow-card-steps {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+
+.flow-card-step {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.flow-card-step dt {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.flow-card-step dd {
+  margin: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.8);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flow-card-step--now dt {
+  color: var(--accent-primary, #d4a017);
+}
+
+.flow-card-step--now dd {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.flow-card-facts {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}

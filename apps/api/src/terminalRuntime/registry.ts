@@ -11,9 +11,14 @@ import type {
   TentacleWorkspaceMode,
   TerminalLifecycleState,
   TerminalNameOrigin,
+  TerminalProviderError,
   TerminalRegistryDocument,
 } from "./types";
-import { isTerminalAgentProvider, isTerminalCompletionSoundId } from "./types";
+import {
+  isTerminalAgentProvider,
+  isTerminalCompletionSoundId,
+  isTerminalProviderErrorKind,
+} from "./types";
 
 const REGISTRY_PERSIST_DEBOUNCE_MS = 100;
 
@@ -33,7 +38,49 @@ const isTerminalLifecycleState = (value: unknown): value is TerminalLifecycleSta
   value === "running" ||
   value === "stopped" ||
   value === "exited" ||
-  value === "stale";
+  value === "stale" ||
+  value === "stalled" ||
+  value === "awaiting-review" ||
+  value === "completed";
+
+// The registry file is a contract surface: parse the persisted completion
+// summary defensively rather than trusting its shape, and drop it entirely
+// when the load-bearing `merged` flag is missing — worktree gc must never act
+// on a summary it cannot trust.
+const parseTerminalCompletionSummary = (value: unknown): PersistedTerminal["completionSummary"] => {
+  if (!isRecord(value) || typeof value.merged !== "boolean") {
+    return undefined;
+  }
+
+  const commits = Array.isArray(value.commits)
+    ? value.commits.flatMap((commit) =>
+        isRecord(commit) && typeof commit.hash === "string" && typeof commit.message === "string"
+          ? [{ hash: commit.hash, message: commit.message }]
+          : [],
+      )
+    : [];
+
+  return {
+    taskLine: typeof value.taskLine === "string" ? value.taskLine : null,
+    commits,
+    filesChanged: typeof value.filesChanged === "number" ? value.filesChanged : 0,
+    insertions: typeof value.insertions === "number" ? value.insertions : 0,
+    deletions: typeof value.deletions === "number" ? value.deletions : 0,
+    branch: typeof value.branch === "string" ? value.branch : null,
+    merged: value.merged,
+    durationMs: typeof value.durationMs === "number" ? value.durationMs : null,
+    workspaceMode: value.workspaceMode === "worktree" ? "worktree" : "shared",
+  };
+};
+
+const parseTerminalProviderError = (value: unknown): TerminalProviderError | undefined =>
+  isRecord(value) &&
+  isTerminalProviderErrorKind(value.kind) &&
+  typeof value.message === "string" &&
+  typeof value.at === "string" &&
+  Number.isFinite(Date.parse(value.at))
+    ? { kind: value.kind, message: value.message, at: value.at }
+    : undefined;
 
 const inferTerminalNameOrigin = (terminalId: string, tentacleName: string): TerminalNameOrigin => {
   if (tentacleName === terminalId || /^Octogent Terminal \d+$/.test(tentacleName)) {
@@ -266,7 +313,18 @@ const parseV3Terminals = (
     if (typeof entry.worktreeId === "string") terminal.worktreeId = entry.worktreeId;
     if (typeof entry.parentTerminalId === "string")
       terminal.parentTerminalId = entry.parentTerminalId;
+    if (
+      Array.isArray(entry.inheritedEnv) &&
+      entry.inheritedEnv.every((name) => typeof name === "string")
+    ) {
+      terminal.inheritedEnv = entry.inheritedEnv as string[];
+    }
     if (isTerminalAgentProvider(entry.agentProvider)) terminal.agentProvider = entry.agentProvider;
+    if (typeof entry.agentModel === "string") terminal.agentModel = entry.agentModel;
+    if (typeof entry.agentEffortTier === "string") terminal.agentEffortTier = entry.agentEffortTier;
+    if (typeof entry.agentModelObserved === "string") {
+      terminal.agentModelObserved = entry.agentModelObserved;
+    }
     if (typeof entry.initialPrompt === "string") terminal.initialPrompt = entry.initialPrompt;
     if (typeof entry.initialInputDraft === "string") {
       terminal.initialInputDraft = entry.initialInputDraft;
@@ -274,6 +332,18 @@ const parseV3Terminals = (
     if (typeof entry.autoRenamePromptContext === "string") {
       terminal.autoRenamePromptContext = entry.autoRenamePromptContext;
     }
+    if (
+      (entry.attentionKind === "permission" || entry.attentionKind === "user") &&
+      typeof entry.attentionSince === "string" &&
+      Number.isFinite(Date.parse(entry.attentionSince))
+    ) {
+      terminal.attentionKind = entry.attentionKind;
+      terminal.attentionSince = entry.attentionSince;
+      if (typeof entry.attentionToolName === "string")
+        terminal.attentionToolName = entry.attentionToolName;
+    }
+    const providerError = parseTerminalProviderError(entry.providerError);
+    if (providerError) terminal.providerError = providerError;
     if (typeof entry.lastActiveAt === "string") terminal.lastActiveAt = entry.lastActiveAt;
     if (isTerminalLifecycleState(entry.lifecycleState)) {
       terminal.lifecycleState = entry.lifecycleState;
@@ -302,6 +372,10 @@ const parseV3Terminals = (
     ) {
       terminal.exitSignal = entry.exitSignal;
     }
+    if (typeof entry.archivedAt === "string") terminal.archivedAt = entry.archivedAt;
+    if (typeof entry.completedAt === "string") terminal.completedAt = entry.completedAt;
+    const completionSummary = parseTerminalCompletionSummary(entry.completionSummary);
+    if (completionSummary) terminal.completionSummary = completionSummary;
     terminals.set(terminalId, terminal);
   }
 

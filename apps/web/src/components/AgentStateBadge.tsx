@@ -1,4 +1,5 @@
 import { type AgentRuntimeState, isAgentRuntimeState } from "@octogent/core";
+import { useT } from "../app/providers/LocaleProvider";
 import { StatusBadge, type StatusBadgeTone } from "./ui/StatusBadge";
 
 export type { AgentRuntimeState } from "@octogent/core";
@@ -6,17 +7,6 @@ export { isAgentRuntimeState } from "@octogent/core";
 
 type AgentStateBadgeProps = {
   state: AgentRuntimeState;
-};
-
-const stateLabel = (state: AgentRuntimeState): string => {
-  switch (state) {
-    case "waiting_for_permission":
-      return "PERMISSION";
-    case "waiting_for_user":
-      return "WAITING";
-    default:
-      return state.toUpperCase();
-  }
 };
 
 const stateTone = (state: AgentRuntimeState): StatusBadgeTone => {
@@ -29,19 +19,34 @@ const stateTone = (state: AgentRuntimeState): StatusBadgeTone => {
   }
 };
 
-export const AgentStateBadge = ({ state }: AgentStateBadgeProps) => (
-  <StatusBadge
-    className="terminal-state-badge"
-    label={stateLabel(state)}
-    compactLabel={
-      state === "waiting_for_permission"
-        ? "PERM"
-        : state === "waiting_for_user"
-          ? "WAIT"
-          : state === "processing"
-            ? "PROC"
-            : state.toUpperCase()
+export const AgentStateBadge = ({ state }: AgentStateBadgeProps) => {
+  const t = useT();
+
+  const stateLabel = (s: AgentRuntimeState): string => {
+    switch (s) {
+      case "waiting_for_permission":
+        return t("agentState.permission");
+      case "waiting_for_user":
+        return t("agentState.waiting");
+      default:
+        return s.toUpperCase();
     }
-    tone={stateTone(state)}
-  />
-);
+  };
+
+  return (
+    <StatusBadge
+      className="terminal-state-badge"
+      label={stateLabel(state)}
+      compactLabel={
+        state === "waiting_for_permission"
+          ? t("agentState.permissionShort")
+          : state === "waiting_for_user"
+            ? t("agentState.waitingShort")
+            : state === "processing"
+              ? t("agentState.processingShort")
+              : state.toUpperCase()
+      }
+      tone={stateTone(state)}
+    />
+  );
+};

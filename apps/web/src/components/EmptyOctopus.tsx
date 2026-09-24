@@ -1,4 +1,7 @@
 import { useEffect, useRef } from "react";
+import type { OctopusAccessory, OctopusAnimation, OctopusExpression } from "../app/octopusVisuals";
+
+export type { OctopusAccessory, OctopusAnimation, OctopusExpression } from "../app/octopusVisuals";
 
 /*
  * Pixel-art octopus rendered via Canvas 2D.
@@ -327,11 +330,6 @@ const SPRITE_H =
   HEAD_BODY.length +
   TENTACLE_TOP.length +
   TAIL_NEUTRAL.length;
-
-export type OctopusAnimation = "idle" | "sway" | "walk" | "jog" | "swim-up" | "bounce" | "float";
-// "sleepy" is reserved for idle/inactive tentacles — never assign it randomly on creation.
-export type OctopusExpression = "normal" | "happy" | "sleepy" | "angry" | "surprised";
-export type OctopusAccessory = "none" | "long" | "mohawk" | "side-sweep" | "curly";
 
 // ─── Accessories ──────────────────────────────────────────────────────────────
 // Drawn as smooth vector shapes on the canvas (not pixel art) so they look

@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { type ClaudeUsageSnapshot, asNumber, asRecord, asString } from "@octogent/core";
@@ -33,6 +33,21 @@ export type { ClaudeUsageSnapshot };
 
 type ClaudeUsageStatus = ClaudeUsageSnapshot["status"];
 
+export type ClaudeUsageSourceMode = "auto" | "oauth" | "cli" | "off";
+
+const CLAUDE_USAGE_SOURCE_ENV = "OCTOGENT_CLAUDE_USAGE_SOURCE";
+
+/** Parses `OCTOGENT_CLAUDE_USAGE_SOURCE`; blank or unknown values fall back to `auto`. */
+export const parseClaudeUsageSource = (value: string | undefined): ClaudeUsageSourceMode => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "auto" ||
+    normalized === "oauth" ||
+    normalized === "cli" ||
+    normalized === "off"
+    ? normalized
+    : "auto";
+};
+
 type ClaudeOauthCredentials = {
   accessToken: string;
   scopes: string[];
@@ -46,7 +61,15 @@ type ClaudeUsageDependencies = {
   spawnCliUsage?: () => Promise<string | null>;
   projectStateDir?: string;
   backgroundRefreshOnly?: boolean;
+  /** Raw source-mode override; defaults to the OCTOGENT_CLAUDE_USAGE_SOURCE env var. */
+  usageSource?: string;
 };
+
+const resolveUsageSource = (dependencies: ClaudeUsageDependencies): ClaudeUsageSourceMode =>
+  parseClaudeUsageSource(dependencies.usageSource ?? process.env[CLAUDE_USAGE_SOURCE_ENV]);
+
+const disabledSnapshot = (now: Date): ClaudeUsageSnapshot =>
+  unavailableSnapshot(now, `Claude usage collection is disabled (${CLAUDE_USAGE_SOURCE_ENV}=off).`);
 
 const unavailableSnapshot = (
   now: Date,
@@ -149,6 +172,54 @@ const readWindowPercent = (window: Record<string, unknown> | null): number | nul
 const readWindowResetAt = (window: Record<string, unknown> | null): string | null =>
   toResetIso(window?.reset_at ?? window?.resetAt ?? window?.resets_at);
 
+type ParsedLimitWindow = { percent: number | null; resetAt: string | null };
+
+type ParsedUsageLimits = {
+  session: ParsedLimitWindow | null;
+  weekly: ParsedLimitWindow | null;
+  scoped: (ParsedLimitWindow & { label: string | null }) | null;
+};
+
+const readScopedModelLabel = (entry: Record<string, unknown>): string | null => {
+  const scope = asRecord(entry.scope);
+  const model = asRecord(scope?.model);
+  return asTrimmedString(model?.display_name ?? model?.displayName);
+};
+
+/**
+ * Parses the newer top-level `limits` array (kind: session | weekly_all |
+ * weekly_scoped). Returns null when the array is missing, empty, or holds no
+ * recognized kind, so callers can fall back to the legacy window objects.
+ */
+const parseUsageLimits = (usagePayload: Record<string, unknown>): ParsedUsageLimits | null => {
+  const limits = usagePayload.limits;
+  if (!Array.isArray(limits) || limits.length === 0) {
+    return null;
+  }
+
+  const parsed: ParsedUsageLimits = { session: null, weekly: null, scoped: null };
+  for (const item of limits) {
+    const entry = asRecord(item);
+    if (!entry) continue;
+
+    const kind = asTrimmedString(entry.kind);
+    const window: ParsedLimitWindow = {
+      percent: asNumber(entry.percent),
+      resetAt: toResetIso(entry.resets_at ?? entry.resetsAt),
+    };
+
+    if (kind === "session" && !parsed.session) {
+      parsed.session = window;
+    } else if (kind === "weekly_all" && !parsed.weekly) {
+      parsed.weekly = window;
+    } else if (kind === "weekly_scoped" && !parsed.scoped) {
+      parsed.scoped = { ...window, label: readScopedModelLabel(entry) };
+    }
+  }
+
+  return parsed.session || parsed.weekly || parsed.scoped ? parsed : null;
+};
+
 const inferPlanType = (rateLimitTier: string | null): string | null => {
   const tier = rateLimitTier?.toLowerCase() ?? "";
   if (tier.includes("max")) return "Claude Max";
@@ -167,6 +238,10 @@ const mapUsageSnapshot = (
   if (!usagePayload) {
     throw new Error("invalid_usage_payload");
   }
+
+  // Newer payloads carry a top-level `limits` array; each window falls back
+  // to its legacy object when the array lacks that kind (or is absent).
+  const limits = parseUsageLimits(usagePayload);
 
   const primaryWindow = resolveUsageWindow(usagePayload, "five_hour");
   const weeklyWindow =
@@ -193,12 +268,15 @@ const mapUsageSnapshot = (
     planType:
       asTrimmedString(usagePayload.plan_type ?? usagePayload.planType) ??
       inferPlanType(rateLimitTier),
-    primaryUsedPercent: readWindowPercent(primaryWindow),
-    primaryResetAt: readWindowResetAt(primaryWindow),
-    secondaryUsedPercent: readWindowPercent(weeklyWindow),
-    secondaryResetAt: readWindowResetAt(weeklyWindow),
+    primaryUsedPercent: limits?.session ? limits.session.percent : readWindowPercent(primaryWindow),
+    primaryResetAt: limits?.session ? limits.session.resetAt : readWindowResetAt(primaryWindow),
+    secondaryUsedPercent: limits?.weekly ? limits.weekly.percent : readWindowPercent(weeklyWindow),
+    secondaryResetAt: limits?.weekly ? limits.weekly.resetAt : readWindowResetAt(weeklyWindow),
     sonnetUsedPercent: readWindowPercent(sonnetWindow),
     sonnetResetAt: readWindowResetAt(sonnetWindow),
+    scopedUsedPercent: limits?.scoped?.percent ?? null,
+    scopedResetAt: limits?.scoped?.resetAt ?? null,
+    scopedLabel: limits?.scoped?.label ?? null,
     extraUsageCostUsed,
     extraUsageCostLimit,
   };
@@ -421,6 +499,9 @@ const normalizePersistedSnapshot = (value: unknown): ClaudeUsageSnapshot | null 
     secondaryResetAt: asTrimmedString(record.secondaryResetAt),
     sonnetUsedPercent: asNumber(record.sonnetUsedPercent),
     sonnetResetAt: asTrimmedString(record.sonnetResetAt),
+    scopedUsedPercent: asNumber(record.scopedUsedPercent),
+    scopedResetAt: asTrimmedString(record.scopedResetAt),
+    scopedLabel: asTrimmedString(record.scopedLabel),
     extraUsageCostUsed: asNumber(record.extraUsageCostUsed),
     extraUsageCostLimit: asNumber(record.extraUsageCostLimit),
   };
@@ -495,6 +576,29 @@ const isClaudeCliReady = (normalized: string, collapsed: string): boolean => {
   return collapsed.includes("claudecodev") && normalized.includes("❯");
 };
 
+/**
+ * Terminates the probe's whole process group.
+ *
+ * node-pty starts the shell in its own session, so the child is a group leader.
+ * Killing only that pid orphans everything Claude Code spawned underneath it,
+ * and those orphans accumulate until the host runs out of room.
+ */
+export const killProcessGroup = (
+  pid: number,
+  kill: (target: number, signal: NodeJS.Signals) => void = process.kill,
+): void => {
+  try {
+    kill(-pid, "SIGKILL");
+  } catch {
+    // The group may already be gone; still try the pid itself below.
+  }
+  try {
+    kill(pid, "SIGKILL");
+  } catch {
+    // Already dead.
+  }
+};
+
 const spawnCliAndCapture = (binary: string): Promise<string | null> =>
   new Promise<string | null>((resolve) => {
     import("node-pty")
@@ -504,15 +608,19 @@ const spawnCliAndCapture = (binary: string): Promise<string | null> =>
         let done = false;
         let phase: "waiting" | "capturing" = "waiting";
         let settleTimer: ReturnType<typeof setTimeout> | null = null;
-        let enterTimer: ReturnType<typeof setInterval> | null = null;
         let usageRetryTimer: ReturnType<typeof setTimeout> | null = null;
         let usageSentAt = 0;
         let usageSendCount = 0;
 
-        const term = pty.spawn(binary, ["--allowed-tools", ""], {
+        // Run outside the project. Octogent installs its own SessionStart hook
+        // into the workspace, and that hook asks the API to refresh usage — so a
+        // probe started here would spawn the next probe, without end. A neutral
+        // cwd (and user-only setting sources) keeps the probe off that loop.
+        const term = pty.spawn(binary, ["--allowed-tools", "", "--setting-sources", "user"], {
           name: "xterm-256color",
           cols: CLI_PTY_COLS,
           rows: CLI_PTY_ROWS,
+          cwd: tmpdir(),
           env: scrubbedEnv(),
         });
 
@@ -521,13 +629,13 @@ const spawnCliAndCapture = (binary: string): Promise<string | null> =>
           done = true;
           if (deadlineTimer) clearTimeout(deadlineTimer);
           if (settleTimer) clearTimeout(settleTimer);
-          if (enterTimer) clearInterval(enterTimer);
           if (usageRetryTimer) clearTimeout(usageRetryTimer);
           try {
             term.kill();
           } catch {
             /* already dead */
           }
+          killProcessGroup(term.pid);
           resolve(result);
         };
 
@@ -551,14 +659,11 @@ const spawnCliAndCapture = (binary: string): Promise<string | null> =>
             finish(null);
             return;
           }
-          // Periodic Enter presses to refresh TUI render
-          enterTimer = setInterval(() => {
-            try {
-              term.write("\r");
-            } catch {
-              /* ignore */
-            }
-          }, CLI_PTY_ENTER_INTERVAL_MS);
+          // No periodic Enter here. In the Claude Code TUI a Return submits a
+          // turn, so a timer pressing it every CLI_PTY_ENTER_INTERVAL_MS spawned
+          // a process per press — dozens per probe, all orphaned on timeout.
+          // The /usage write above renders the view; the retry below covers a
+          // slow first paint.
 
           if (usageRetryTimer) clearTimeout(usageRetryTimer);
           usageRetryTimer = setTimeout(() => {
@@ -752,10 +857,11 @@ export const readClaudeOauthUsageSnapshot = async (
     : snapshot;
 };
 
-export const readClaudeCliUsageSnapshot = async (
-  dependencies: ClaudeUsageDependencies = {},
-): Promise<ClaudeUsageSnapshot> => {
-  const now = dependencies.now?.() ?? new Date();
+/** Runs the CLI PTY probe; returns a cached ok snapshot, or null when it yields no data. */
+const readCliOkSnapshot = async (
+  dependencies: ClaudeUsageDependencies,
+  now: Date,
+): Promise<ClaudeUsageSnapshot | null> => {
   const spawnCliUsage = dependencies.spawnCliUsage ?? spawnDefaultCliUsage;
   try {
     const cliOutput = await spawnCliUsage();
@@ -781,48 +887,52 @@ export const readClaudeCliUsageSnapshot = async (
     );
   }
 
-  return unavailableSnapshot(now, "Claude CLI usage unavailable.", "error");
+  return null;
+};
+
+export const readClaudeCliUsageSnapshot = async (
+  dependencies: ClaudeUsageDependencies = {},
+): Promise<ClaudeUsageSnapshot> => {
+  const now = dependencies.now?.() ?? new Date();
+  return (
+    (await readCliOkSnapshot(dependencies, now)) ??
+    unavailableSnapshot(now, "Claude CLI usage unavailable.", "error")
+  );
 };
 
 const refreshClaudeUsageSnapshot = async (
   dependencies: ClaudeUsageDependencies = {},
 ): Promise<ClaudeUsageSnapshot> => {
   const now = dependencies.now?.() ?? new Date();
+  const sourceMode = resolveUsageSource(dependencies);
 
-  // Prefer the CLI PTY path when it works, since it reflects Claude Code
-  // usage directly and avoids OAuth API rate-limit failures.
-  const spawnCliUsage = dependencies.spawnCliUsage ?? spawnDefaultCliUsage;
-  try {
-    const cliOutput = await spawnCliUsage();
-    if (cliOutput) {
-      const cleaned = stripAnsiCodes(cliOutput);
-      logVerbose(`[claude-usage] CLI PTY captured ${cleaned.length} chars`);
-      const parsed = parseCliUsageOutput(cliOutput);
-      if (cliHasRealData(parsed)) {
-        logVerbose(
-          `[claude-usage] CLI PTY parsed: session=${parsed.primaryUsedPercent}% week=${parsed.secondaryUsedPercent}% sonnet=${parsed.sonnetUsedPercent}%`,
-        );
-        return await cacheOkSnapshot(buildCliSnapshot(parsed, now), dependencies.projectStateDir);
-      }
-      logVerbose(
-        `[claude-usage] CLI PTY output had no parseable usage data. First 500 chars:\n${cleaned.slice(0, 500)}`,
-      );
-    } else {
-      logVerbose("[claude-usage] CLI PTY returned null (binary missing or node-pty unavailable)");
-    }
-  } catch (error) {
-    logVerbose(
-      `[claude-usage] CLI PTY error: ${error instanceof Error ? error.message : String(error)}`,
+  if (sourceMode === "off") {
+    return disabledSnapshot(now);
+  }
+
+  if (sourceMode === "cli") {
+    return (
+      (await readCliOkSnapshot(dependencies, now)) ??
+      unavailableSnapshot(now, "Claude CLI usage unavailable.", "error")
     );
   }
 
-  // Fall back to OAuth API when CLI does not yield usable data.
+  // Prefer the OAuth API: it is cheap and structured. The CLI PTY probe
+  // screen-scrapes an interactive TUI and is fragile, so `auto` only falls
+  // back to it when OAuth yields no data (and `oauth` never does).
   const readCredentialsJson = dependencies.readCredentialsJson ?? readDefaultCredentialsJson;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const oauthSnapshot = await readOauthUsageSnapshot(now, readCredentialsJson, fetchImpl);
 
   if (oauthSnapshot.status === "ok") {
     return await cacheOkSnapshot(oauthSnapshot, dependencies.projectStateDir);
+  }
+
+  if (sourceMode === "auto") {
+    const cliSnapshot = await readCliOkSnapshot(dependencies, now);
+    if (cliSnapshot) {
+      return cliSnapshot;
+    }
   }
 
   const cachedOkSnapshot = getCachedOkSnapshot();
@@ -877,6 +987,12 @@ export const readClaudeUsageSnapshot = async (
 ): Promise<ClaudeUsageSnapshot> => {
   const now = dependencies.now?.() ?? new Date();
   const backgroundRefreshOnly = dependencies.backgroundRefreshOnly ?? false;
+
+  // `off` means "do not collect": short-circuit before serving cache or
+  // starting any refresh, so no source is contacted at all.
+  if (resolveUsageSource(dependencies) === "off") {
+    return disabledSnapshot(now);
+  }
 
   // Return cached snapshot if fresh enough (prevents rate-limit storms)
   if (cachedSnapshot && Date.now() - cachedSnapshot.fetchedAt < CACHE_TTL_MS) {

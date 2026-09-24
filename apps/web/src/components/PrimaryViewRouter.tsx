@@ -1,7 +1,10 @@
 import type { ComponentProps, ReactNode } from "react";
+import { NAV_INDEX } from "../app/constants";
+import { FlowPrimaryView } from "./FlowPrimaryView";
 
 import type { PrimaryNavIndex } from "../app/constants";
 import type { UseMonitorRuntimeResult } from "../app/hooks/useMonitorRuntime";
+import { useT } from "../app/providers/LocaleProvider";
 import { ActivityPrimaryView } from "./ActivityPrimaryView";
 import { CanvasPrimaryView } from "./CanvasPrimaryView";
 import { CodeIntelPrimaryView } from "./CodeIntelPrimaryView";
@@ -12,6 +15,7 @@ import { PromptsPrimaryView } from "./PromptsPrimaryView";
 import { SettingsPrimaryView } from "./SettingsPrimaryView";
 
 type PrimaryViewRouterProps = {
+  flowPrimaryViewProps: React.ComponentProps<typeof FlowPrimaryView>;
   activePrimaryNav: PrimaryNavIndex;
   deckPrimaryViewProps: ComponentProps<typeof DeckPrimaryView>;
   isMonitorVisible: boolean;
@@ -36,6 +40,7 @@ type PrimaryViewRouterProps = {
 };
 
 export const PrimaryViewRouter = ({
+  flowPrimaryViewProps,
   activePrimaryNav,
   deckPrimaryViewProps,
   isMonitorVisible,
@@ -49,33 +54,34 @@ export const PrimaryViewRouter = ({
   promptsEnabled,
   onPromptsSidebarContent,
 }: PrimaryViewRouterProps) => {
-  if (activePrimaryNav === 2) {
+  const t = useT();
+  if (activePrimaryNav === NAV_INDEX.deck) {
     return <DeckPrimaryView {...deckPrimaryViewProps} />;
   }
 
-  if (activePrimaryNav === 3) {
+  if (activePrimaryNav === NAV_INDEX.activity) {
     return <ActivityPrimaryView {...activityPrimaryViewProps} />;
   }
 
-  if (activePrimaryNav === 4) {
-    return <CodeIntelPrimaryView enabled={activePrimaryNav === 4} />;
+  if (activePrimaryNav === NAV_INDEX.codeIntel) {
+    return <CodeIntelPrimaryView enabled={activePrimaryNav === NAV_INDEX.codeIntel} />;
   }
 
-  if (activePrimaryNav === 5) {
+  if (activePrimaryNav === NAV_INDEX.monitor) {
     if (isMonitorVisible) {
       return <MonitorPrimaryView monitorRuntime={monitorRuntime} />;
     }
     return (
-      <section className="monitor-view" aria-label="Monitor primary view disabled">
+      <section className="monitor-view" aria-label={t("web.a11y.monitorViewDisabled")}>
         <section className="monitor-panel monitor-panel--configure">
-          <h3>Monitor is disabled</h3>
-          <p>Enable Monitor workspace view in Settings to restore this panel.</p>
+          <h3>{t("web.monitor.disabledTitle")}</h3>
+          <p>{t("web.monitor.disabledDesc")}</p>
         </section>
       </section>
     );
   }
 
-  if (activePrimaryNav === 6) {
+  if (activePrimaryNav === NAV_INDEX.conversations) {
     return (
       <ConversationsPrimaryView
         enabled={conversationsEnabled}
@@ -85,14 +91,18 @@ export const PrimaryViewRouter = ({
     );
   }
 
-  if (activePrimaryNav === 7) {
+  if (activePrimaryNav === NAV_INDEX.prompts) {
     return (
       <PromptsPrimaryView enabled={promptsEnabled} onSidebarContent={onPromptsSidebarContent} />
     );
   }
 
-  if (activePrimaryNav === 8) {
+  if (activePrimaryNav === NAV_INDEX.settings) {
     return <SettingsPrimaryView {...settingsPrimaryViewProps} />;
+  }
+
+  if (activePrimaryNav === NAV_INDEX.flow) {
+    return <FlowPrimaryView {...flowPrimaryViewProps} />;
   }
 
   return <CanvasPrimaryView {...canvasPrimaryViewProps} />;

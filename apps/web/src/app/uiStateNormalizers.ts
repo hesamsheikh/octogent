@@ -1,8 +1,24 @@
-import { asRecord } from "@octogent/core";
+import { SUPPORTED_LOCALES, asRecord } from "@octogent/core";
+import type { Locale } from "@octogent/core";
 
 import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, PRIMARY_NAV_MAX } from "./constants";
+import type { PrimaryNavIndex } from "./constants";
 import { isTerminalCompletionSoundId } from "./notificationSounds";
 import type { FrontendUiStateSnapshot } from "./types";
+
+// Nav schema 2 puts the flow view first and shifts the original pages up by
+// one. A snapshot without the version stamp predates that order, so its index
+// is remapped once; the legacy preview slot 9 (where flow briefly lived) maps
+// back to the new first page.
+export const NAV_SCHEMA_VERSION = 2;
+
+const migrateNavIndex = (index: PrimaryNavIndex, version: unknown): PrimaryNavIndex => {
+  if (version === NAV_SCHEMA_VERSION) {
+    return index;
+  }
+  const shifted = index >= PRIMARY_NAV_MAX ? 1 : index + 1;
+  return shifted as PrimaryNavIndex;
+};
 
 export const clampSidebarWidth = (width: number) =>
   Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
@@ -22,7 +38,17 @@ export const normalizeFrontendUiStateSnapshot = (
     record.activePrimaryNav >= 1 &&
     record.activePrimaryNav <= PRIMARY_NAV_MAX
   ) {
-    nextState.activePrimaryNav = record.activePrimaryNav;
+    nextState.activePrimaryNav = migrateNavIndex(
+      record.activePrimaryNav as PrimaryNavIndex,
+      record.navSchemaVersion,
+    );
+  }
+  nextState.navSchemaVersion = NAV_SCHEMA_VERSION;
+
+  // Without this the language picker never survived a reload: the persisted
+  // snapshot round-trips through here, and an unhandled field is dropped.
+  if (typeof record.locale === "string" && SUPPORTED_LOCALES.includes(record.locale as Locale)) {
+    nextState.locale = record.locale as Locale;
   }
 
   if (typeof record.isAgentsSidebarVisible === "boolean") {

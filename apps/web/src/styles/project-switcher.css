@@ -1,0 +1,102 @@
+/* Project switcher: leads the primary nav on a hub project page. */
+
+.console-shell .console-primary-nav[data-has-project-switcher="true"] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.project-switcher {
+  position: relative;
+}
+
+.project-switcher-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 14rem;
+  border: 1px solid #d7b4b6;
+  border-radius: 0;
+  background: color-mix(in srgb, #000000 18%, transparent);
+  padding: 0.14rem 0.36rem;
+  color: #fff8f8;
+  font-family: var(--font-main);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.project-switcher-toggle[aria-expanded="true"],
+.project-switcher-toggle:hover {
+  background: color-mix(in srgb, #ffffff 16%, transparent);
+}
+
+.project-switcher-toggle:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.project-switcher-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-caret {
+  font-size: 0.6rem;
+}
+
+.project-switcher-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 100;
+  min-width: 16rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-1);
+  padding: 0.2rem 0;
+  list-style: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.project-switcher-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0.55rem;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+
+.project-switcher-item:hover,
+.project-switcher-item:focus-visible {
+  background: var(--bg-surface-2);
+  outline: none;
+}
+
+.project-switcher-item[aria-current="page"] {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.project-switcher-item--all {
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-switcher-item-slug {
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+}
+
+.project-switcher-empty {
+  padding: 0.3rem 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+}

@@ -20,3 +20,8 @@
 @import "./styles/console-canvas-code-intel.css";
 @import "./styles/console-canvas-prompts.css";
 @import "./styles/console-overrides-telemetry.css";
+@import "./styles/flow-view.css";
+
+/* Hub: project overview page and in-project switcher */
+@import "./styles/hub-overview.css";
+@import "./styles/project-switcher.css";

@@ -78,6 +78,6 @@ Watch for these in your own behavior:
 2. **Blind merging** — Merging branches without reading the diff. A worker may have committed partial work, unrelated changes, or broken tests.
 3. **Ignoring BLOCKED** — A blocked worker won't unblock itself. Every BLOCKED message needs investigation and a response from you.
 
-Your terminal ID is `{{terminalId}}`. The API is at `http://localhost:{{apiPort}}`.
+Your terminal ID is `{{terminalId}}`. The API is at `{{apiBaseUrl}}`.
 
 REMINDER: Do not merge until ALL workers report DONE. Do not do workers' tasks yourself. Review every diff before merging.

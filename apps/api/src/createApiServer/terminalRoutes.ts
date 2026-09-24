@@ -7,15 +7,22 @@ import {
   type TerminalAgentProvider,
   type TerminalNameOrigin,
 } from "../terminalRuntime";
+import { DEFAULT_AGENT_PROVIDER } from "../terminalRuntime/constants";
+import type { EffortTier } from "../terminalRuntime/modelSelection";
+import { MAX_TERMINAL_INPUT_BYTES } from "../terminalRuntime/terminalInput";
+import { findExhaustedUsage } from "../usageExhaustion";
 import type { ApiRouteHandler } from "./routeHelpers";
 import {
   readJsonBodyOrWriteError,
+  runtimeInputErrorStatus,
   writeJson,
   writeMethodNotAllowed,
   writeNoContent,
 } from "./routeHelpers";
 import {
   parseTerminalAgentProvider,
+  parseTerminalInheritedEnv,
+  parseTerminalModelSelection,
   parseTerminalName,
   parseTerminalNameOrigin,
   parseTerminalWorkspaceMode,
@@ -55,14 +62,24 @@ export const handleTerminalSnapshotsRoute: ApiRouteHandler = async (
     return true;
   }
 
-  const payload = runtime.listTerminalSnapshots();
+  const includeArchived = requestUrl.searchParams.get("includeArchived") === "1";
+  const payload = runtime.listTerminalSnapshots({ includeArchived });
   writeJson(response, 200, payload, corsOrigin);
   return true;
 };
 
 export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
-  { runtime, workspaceCwd, projectStateDir, promptsDir, userPromptsDir, getApiPort },
+  {
+    runtime,
+    workspaceCwd,
+    projectStateDir,
+    promptsDir,
+    userPromptsDir,
+    getApiPort,
+    getApiBaseUrl,
+    readCachedUsage,
+  },
 ) => {
   if (requestUrl.pathname !== "/api/terminals") {
     return false;
@@ -102,6 +119,18 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
     return true;
   }
 
+  const modelSelectionResult = parseTerminalModelSelection(bodyReadResult.payload);
+  if (modelSelectionResult.error) {
+    writeJson(response, 400, { error: modelSelectionResult.error }, corsOrigin);
+    return true;
+  }
+
+  const inheritedEnvResult = parseTerminalInheritedEnv(bodyReadResult.payload);
+  if (inheritedEnvResult.error) {
+    writeJson(response, 400, { error: inheritedEnvResult.error }, corsOrigin);
+    return true;
+  }
+
   try {
     const createTerminalInput: {
       terminalId?: string;
@@ -110,11 +139,14 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
       tentacleName?: string;
       workspaceMode: TentacleWorkspaceMode;
       agentProvider?: TerminalAgentProvider;
+      agentModel?: string;
+      agentEffort?: EffortTier;
       nameOrigin?: TerminalNameOrigin;
       initialPrompt?: string;
       initialInputDraft?: string;
       autoRenamePromptContext?: string;
       parentTerminalId?: string;
+      inheritedEnv?: Record<string, string>;
     } = {
       workspaceMode: workspaceModeResult.workspaceMode,
     };
@@ -124,8 +156,17 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
     if (agentProviderResult.agentProvider !== undefined) {
       createTerminalInput.agentProvider = agentProviderResult.agentProvider;
     }
+    if (modelSelectionResult.agentModel !== undefined) {
+      createTerminalInput.agentModel = modelSelectionResult.agentModel;
+    }
+    if (modelSelectionResult.agentEffort !== undefined) {
+      createTerminalInput.agentEffort = modelSelectionResult.agentEffort;
+    }
     if (nameOriginResult.nameOrigin !== undefined) {
       createTerminalInput.nameOrigin = nameOriginResult.nameOrigin;
+    }
+    if (inheritedEnvResult.inheritedEnv !== undefined) {
+      createTerminalInput.inheritedEnv = inheritedEnvResult.inheritedEnv;
     }
     const bodyPayload = bodyReadResult.payload as Record<string, unknown> | null;
     if (
@@ -193,6 +234,11 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
       if (!templateVars.apiPort) {
         templateVars.apiPort = getApiPort();
       }
+      // The full base, not just the port: under the hub the project lives
+      // under /api/p/<id>, and the port alone would reach the hub root.
+      if (!templateVars.apiBaseUrl) {
+        templateVars.apiBaseUrl = getApiBaseUrl();
+      }
 
       // Auto-inject userPromptsDir so prompt templates know where to save user prompts.
       if (!templateVars.userPromptsDir) {
@@ -245,11 +291,20 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
     if (createTerminalInput.initialPrompt) {
       payload.initialPrompt = createTerminalInput.initialPrompt;
     }
+    const usageWarning = findExhaustedUsage(
+      snapshot.agentProvider ?? DEFAULT_AGENT_PROVIDER,
+      snapshot.agentModel ?? null,
+      readCachedUsage(),
+      Date.now(),
+    );
+    if (usageWarning) {
+      payload.usageWarning = usageWarning;
+    }
     writeJson(response, 201, payload, corsOrigin);
     return true;
   } catch (error) {
     if (error instanceof RuntimeInputError) {
-      writeJson(response, 400, { error: error.message }, corsOrigin);
+      writeJson(response, runtimeInputErrorStatus(error), { error: error.message }, corsOrigin);
       return true;
     }
 
@@ -258,7 +313,7 @@ export const handleTerminalsCollectionRoute: ApiRouteHandler = async (
 };
 
 const TERMINAL_ITEM_PATH_PATTERN = /^\/api\/terminals\/([^/]+)$/;
-const TERMINAL_ACTION_PATH_PATTERN = /^\/api\/terminals\/([^/]+)\/(stop|kill)$/;
+const TERMINAL_ACTION_PATH_PATTERN = /^\/api\/terminals\/([^/]+)\/(stop|kill|archive)$/;
 
 export const handleTerminalItemRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
@@ -277,7 +332,11 @@ export const handleTerminalItemRoute: ApiRouteHandler = async (
   const terminalId = decodeURIComponent(renameMatch[1] ?? "");
   if (request.method === "DELETE") {
     try {
-      runtime.deleteTerminal(terminalId);
+      // The worktree directory survives a plain delete (record only); pass
+      // ?removeWorktree=true to reclaim it, which the caller does only after
+      // confirming any unmerged work is expendable.
+      const removeWorktree = requestUrl.searchParams.get("removeWorktree") === "true";
+      runtime.deleteTerminal(terminalId, { removeWorktree });
       writeNoContent(response, 204, corsOrigin);
       return true;
     } catch (error) {
@@ -315,6 +374,30 @@ export const handleTerminalItemRoute: ApiRouteHandler = async (
   return true;
 };
 
+const TERMINAL_DELETE_PREVIEW_PATTERN = /^\/api\/terminals\/([^/]+)\/delete-preview$/;
+
+export const handleTerminalDeletePreviewRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  const match = requestUrl.pathname.match(TERMINAL_DELETE_PREVIEW_PATTERN);
+  if (!match) {
+    return false;
+  }
+  if (request.method !== "GET") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+  const terminalId = decodeURIComponent(match[1] ?? "");
+  const preview = runtime.previewTerminalDeletion(terminalId);
+  if (!preview.exists) {
+    writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
+    return true;
+  }
+  writeJson(response, 200, preview, corsOrigin);
+  return true;
+};
+
 export const handleTerminalActionRoute: ApiRouteHandler = async (
   { request, response, requestUrl, corsOrigin },
   { runtime },
@@ -331,15 +414,27 @@ export const handleTerminalActionRoute: ApiRouteHandler = async (
 
   const terminalId = decodeURIComponent(actionMatch[1] ?? "");
   const action = actionMatch[2];
-  const snapshot =
-    action === "kill" ? runtime.killTerminal(terminalId) : runtime.stopTerminal(terminalId);
-  if (!snapshot) {
-    writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
-    return true;
-  }
+  try {
+    const snapshot =
+      action === "archive"
+        ? runtime.archiveTerminal(terminalId)
+        : action === "kill"
+          ? runtime.killTerminal(terminalId)
+          : runtime.stopTerminal(terminalId);
+    if (!snapshot) {
+      writeJson(response, 404, { error: "Terminal not found." }, corsOrigin);
+      return true;
+    }
 
-  writeJson(response, 200, snapshot, corsOrigin);
-  return true;
+    writeJson(response, 200, snapshot, corsOrigin);
+    return true;
+  } catch (error) {
+    if (error instanceof RuntimeInputError) {
+      writeJson(response, 409, { error: error.message }, corsOrigin);
+      return true;
+    }
+    throw error;
+  }
 };
 
 export const handleTerminalPruneRoute: ApiRouteHandler = async (
@@ -356,5 +451,100 @@ export const handleTerminalPruneRoute: ApiRouteHandler = async (
   }
 
   writeJson(response, 200, { prunedTerminalIds: runtime.pruneTerminals() }, corsOrigin);
+  return true;
+};
+
+export const handleWorktreeGcRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  if (requestUrl.pathname !== "/api/worktrees/gc") {
+    return false;
+  }
+
+  if (request.method !== "POST") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+
+  const dryRun = requestUrl.searchParams.get("dryRun") === "1";
+  writeJson(response, 200, runtime.gcWorktrees({ dryRun }), corsOrigin);
+  return true;
+};
+
+export const handleTerminalArchiveCompletedRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  if (requestUrl.pathname !== "/api/terminals/archive-completed") {
+    return false;
+  }
+
+  if (request.method !== "POST") {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+
+  writeJson(
+    response,
+    200,
+    { archivedTerminalIds: runtime.archiveCompletedTerminals() },
+    corsOrigin,
+  );
+  return true;
+};
+
+const TERMINAL_SCREEN_INPUT_PATTERN = /^\/api\/terminals\/([^/]+)\/(screen|input)$/;
+
+export const handleTerminalScreenInputRoute: ApiRouteHandler = async (
+  { request, response, requestUrl, corsOrigin },
+  { runtime },
+) => {
+  const match = requestUrl.pathname.match(TERMINAL_SCREEN_INPUT_PATTERN);
+  if (!match) return false;
+  const terminalId = decodeURIComponent(match[1] ?? "");
+  const screen = match[2] === "screen";
+  if (request.method !== (screen ? "GET" : "POST")) {
+    writeMethodNotAllowed(response, corsOrigin);
+    return true;
+  }
+  if (screen) {
+    const lines = Number(requestUrl.searchParams.get("lines") ?? 40);
+    if (!Number.isInteger(lines) || lines < 1 || lines > 200) {
+      writeJson(response, 400, { error: "lines must be an integer from 1 to 200." }, corsOrigin);
+      return true;
+    }
+    const result = await runtime.getScreen(
+      terminalId,
+      lines,
+      requestUrl.searchParams.get("raw") === "1",
+    );
+    writeJson(
+      response,
+      result ? 200 : 404,
+      result ?? { error: "Terminal screen not found." },
+      corsOrigin,
+    );
+    return true;
+  }
+  const body = await readJsonBodyOrWriteError(
+    request,
+    response,
+    corsOrigin,
+    MAX_TERMINAL_INPUT_BYTES,
+  );
+  if (!body.ok) return true;
+  try {
+    const accepted = runtime.submitInput(terminalId, body.payload);
+    writeJson(
+      response,
+      accepted ? 200 : 404,
+      accepted ? { ok: true } : { error: "Live terminal not found." },
+      corsOrigin,
+    );
+  } catch (error) {
+    if (!(error instanceof RuntimeInputError)) throw error;
+    writeJson(response, 400, { error: error.message }, corsOrigin);
+  }
   return true;
 };

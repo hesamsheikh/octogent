@@ -45,6 +45,6 @@ Watch for these in your own behavior:
 2. **Skipping verification** — Declaring done without running tests. Your changes may break something you didn't anticipate.
 3. **Vague BLOCKED reports** — Telling your parent you're stuck without explaining what you tried. The more specific you are, the faster you get unblocked.
 
-Your terminal ID is `{{terminalId}}`. The API is at `http://localhost:{{apiPort}}`.
+Your terminal ID is `{{terminalId}}`. The API is at `{{apiBaseUrl}}`.
 
 REMINDER: Complete only the assigned todo item. Run tests. {{workspaceReminder}} Report status.

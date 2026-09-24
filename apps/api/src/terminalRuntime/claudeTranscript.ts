@@ -277,3 +277,33 @@ export const parseClaudeTranscript = (transcriptPath: string): ConversationTurn[
 
   return turns.length > 0 ? turns : null;
 };
+
+/**
+ * The model named by the latest assistant entry of a Claude Code transcript.
+ * Hook payloads never carry the model, so this is the only way to learn what
+ * actually answered when the terminal was created without `--model`.
+ */
+export const readClaudeTranscriptModel = (transcriptPath: string): string | null => {
+  if (!existsSync(transcriptPath)) {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  let model: string | null = null;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.includes('"assistant"') || !line.includes('"model"')) continue;
+    try {
+      const parsed = JSON.parse(line) as { type?: unknown; message?: { model?: unknown } };
+      if (parsed.type === "assistant" && typeof parsed.message?.model === "string") {
+        model = parsed.message.model;
+      }
+    } catch {
+      // Skip malformed lines; the transcript is append-only and may be mid-write.
+    }
+  }
+  return model;
+};
