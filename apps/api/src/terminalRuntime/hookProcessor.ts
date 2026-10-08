@@ -91,86 +91,31 @@ export const createHookProcessor = (deps: {
     const targetSettingsPath = join(targetClaudeDir, "settings.json");
     const apiBaseUrl = getApiBaseUrl();
 
+    // Every hook is a bash `command` hook that POSTs with curl and ends in `|| true`:
+    //  - `type: "http"` hooks surfaced ECONNREFUSED on every tool call whenever the API was down;
+    //  - without `shell: "bash"`, Windows ran them in PowerShell, which cannot parse `|| true`, `-d @-`
+    //    or `$OCTOGENT_SESSION_ID`.
+    // curl prints the API's JSON reply on stdout, which Claude Code reads exactly like an http hook's body.
+    const post = (route: string, matcher: string, timeout: number) => ({
+      matcher,
+      hooks: [
+        {
+          type: "command",
+          shell: "bash",
+          command: `curl -s --max-time ${timeout - 1} -X POST "${apiBaseUrl}${route}?octogent_session=$OCTOGENT_SESSION_ID" -H "X-Octogent-Session: $OCTOGENT_SESSION_ID" -H 'Content-Type: application/json' -d @- || true`,
+          timeout,
+        },
+      ],
+    });
+
     const hooksConfig = {
       hooks: {
-        SessionStart: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "command",
-                command: `curl -s -X POST "${apiBaseUrl}/api/hooks/session-start?octogent_session=$OCTOGENT_SESSION_ID" -H 'Content-Type: application/json' -d @- || true`,
-                timeout: 5,
-              },
-            ],
-          },
-        ],
-        UserPromptSubmit: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "command",
-                command: `curl -s -X POST "${apiBaseUrl}/api/hooks/user-prompt-submit?octogent_session=$OCTOGENT_SESSION_ID" -H 'Content-Type: application/json' -d @- || true`,
-                timeout: 5,
-              },
-            ],
-          },
-        ],
-        PreToolUse: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "http",
-                url: `${apiBaseUrl}/api/hooks/pre-tool-use`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
-                timeout: 5,
-              },
-            ],
-          },
-        ],
-        PostToolUse: [
-          {
-            matcher: "Edit|Write",
-            hooks: [
-              {
-                type: "http",
-                url: `${apiBaseUrl}/api/code-intel/events`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
-                timeout: 5,
-              },
-            ],
-          },
-        ],
-        Notification: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "http",
-                url: `${apiBaseUrl}/api/hooks/notification`,
-                headers: { "X-Octogent-Session": "$OCTOGENT_SESSION_ID" },
-                allowedEnvVars: ["OCTOGENT_SESSION_ID"],
-                timeout: 5,
-              },
-            ],
-          },
-        ],
-        Stop: [
-          {
-            matcher: "*",
-            hooks: [
-              {
-                type: "command",
-                command: `curl -s -X POST "${apiBaseUrl}/api/hooks/stop?octogent_session=$OCTOGENT_SESSION_ID" -H 'Content-Type: application/json' -d @- || true`,
-                timeout: 15,
-              },
-            ],
-          },
-        ],
+        SessionStart: [post("/api/hooks/session-start", "*", 5)],
+        UserPromptSubmit: [post("/api/hooks/user-prompt-submit", "*", 5)],
+        PreToolUse: [post("/api/hooks/pre-tool-use", "*", 5)],
+        PostToolUse: [post("/api/code-intel/events", "Edit|Write", 5)],
+        Notification: [post("/api/hooks/notification", "*", 5)],
+        Stop: [post("/api/hooks/stop", "*", 15)],
       },
     };
 
